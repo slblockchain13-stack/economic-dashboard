@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Economic Machine Monitor</title>
+<meta name="description" content="Live business-cycle dashboard for the world's major economies: cycle phases, leading indicators, debt cycles, markets, news and investment screens. Updates automatically.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232a78d6'/%3E%3Cpath d='M5 18c4-8 7-8 11 0s7 8 11 0' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><h1>Economic Machine Monitor</h1></div>
+    <span class="status" id="status" title="The update bot refreshes markets and news every hour and economic data daily"><span class="dot" id="dot"></span><span id="status-text">Loading…</span></span>
+    <button class="iconbtn" id="theme" type="button" aria-label="Switch light or dark theme">◐</button>
+    <nav class="tabs" id="tabs" aria-label="Sections">
+      <a href="#world">World</a>
+      <a href="#country">Countries</a>
+      <a href="#compare">Compare</a>
+      <a href="#opportunities">Opportunities</a>
+      <a href="#news">News</a>
+      <a href="#method">How it works</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap" id="view"><div class="loading">Loading live data…</div></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

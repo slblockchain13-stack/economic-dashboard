@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 docs/data/*.tmp
 .claude/
+local.log

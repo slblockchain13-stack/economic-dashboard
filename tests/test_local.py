@@ -6,6 +6,7 @@ import stat
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -80,7 +81,7 @@ class LocalServer(unittest.TestCase):
         d = json.loads(body)
         self.assertEqual((code, d["ok"]), (200, True))
         args = d["text"].splitlines()[0]
-        for flag in ("-p", "--tools  --strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--system-prompt"):
+        for flag in ("-p", "--model opus", "--tools  --strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--system-prompt"):
             self.assertIn(flag, args)
         self.assertIn("MY QUESTION: why?", d["text"])                       # the prompt arrives on standard input
         cwd = next(l for l in d["text"].splitlines() if l.startswith("CWD:"))[4:]
@@ -105,6 +106,88 @@ class LocalServer(unittest.TestCase):
         d = json.loads(call(self.port, "/api/ask", "POST", self.H, json.dumps({"prompt": "q"}).encode())[1])
         self.assertFalse(d["ok"])
         self.assertIn("not signed in", d["text"])
+
+
+
+class FindingClaude(unittest.TestCase):
+    """A double-clicked app does not get the terminal's PATH, and the Claude desktop app keeps its own
+    copy of Claude Code: both must still be found."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def make(self, rel):
+        f = self.home / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("")
+        return f
+
+    def test_mac_desktop_app_copy_newest_first(self):
+        old = self.make("Library/Application Support/Claude/claude-code/2.1.300/aaa/claude.app/Contents/MacOS/claude")
+        new = self.make("Library/Application Support/Claude/claude-code/2.1.321/bbb/claude.app/Contents/MacOS/claude")
+        os.utime(old, (1, 1))
+        c = R.claude_candidates(self.home, windows=False)
+        self.assertEqual(c[0], self.home / ".local" / "bin" / "claude")      # a normal install comes first
+        bundled = [p for p in c if "Application Support" in str(p)]
+        self.assertEqual(bundled, [new, old])
+
+    def test_windows_install_and_desktop_app_copy(self):
+        roaming, local = self.home / "AppData" / "Roaming", self.home / "AppData" / "Local"
+        saved = {k: os.environ.get(k) for k in ("APPDATA", "LOCALAPPDATA")}
+        os.environ["APPDATA"], os.environ["LOCALAPPDATA"] = str(roaming), str(local)
+        try:
+            exe = self.make("AppData/Roaming/Claude/claude-code/2.1.321/claude.exe")
+            c = R.claude_candidates(self.home, windows=True)
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        self.assertIn(self.home / ".local" / "bin" / "claude.exe", c)
+        self.assertIn(roaming / "npm" / "claude.cmd", c)
+        self.assertIn(exe, c)
+
+
+class AppMode(unittest.TestCase):
+    def test_stops_when_no_tab_has_checked_in(self):
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), R.Handler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        R.state["last_seen"] = 0
+        w = threading.Thread(target=R.idle_watch, args=(srv, 1, 0.01), daemon=True)
+        w.start()
+        t.join(5)                                       # bounded: a server that never stops fails, not hangs
+        stopped = not t.is_alive()
+        R.state["last_seen"] = time.time()
+        if not stopped:
+            srv.shutdown()
+        srv.server_close()
+        self.assertTrue(stopped)
+
+    def test_keeps_running_while_a_tab_is_open(self):
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), R.Handler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        R.state["last_seen"] = time.time()
+        # a limit no later test can reach, so this watcher never fires after the test
+        w = threading.Thread(target=R.idle_watch, args=(srv, 10 ** 12, 0.01), daemon=True)
+        w.start()
+        t.join(1.5)                                     # longer than a stop takes (the server polls every 0.5 s)
+        self.assertTrue(t.is_alive())                   # server still running
+        self.assertTrue(w.is_alive())                   # and still being watched
+        srv.shutdown()
+        srv.server_close()
+
+    def test_mac_app_launcher_is_executable_and_points_at_the_project(self):
+        app = ROOT / "Economic Dashboard.app" / "Contents"
+        launch = app / "MacOS" / "launch"
+        self.assertTrue(os.access(launch, os.X_OK))
+        self.assertIn("run_local.py\" --app", launch.read_text())
+        self.assertTrue((app / "Resources" / "AppIcon.icns").read_bytes().startswith(b"icns"))
+        self.assertIn("<string>launch</string>", (app / "Info.plist").read_text())
+        self.assertTrue((ROOT / "icons" / "dashboard.ico").read_bytes().startswith(b"\0\0\1\0"))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,9 @@
     python3 run_local.py              start it and open the browser
     python3 run_local.py --no-open    start it without opening the browser
     python3 run_local.py --port 8800  use another port
+    python3 run_local.py --app        no window: logs to local.log and stops itself 30 minutes after
+                                      the last dashboard tab is closed (used by the app icons)
+    python3 run_local.py --make-shortcut   Windows: put an "Economic Dashboard" icon on the desktop
 
 What it does (Python 3.9+ standard library only, nothing to install):
   * serves the dashboard at http://localhost:8765, to this computer only
@@ -31,6 +34,8 @@ DOCS = ROOT / "docs"
 REFRESH_EVERY = 3600          # seconds between automatic data refreshes
 ASK_TIMEOUT = 240             # seconds to wait for an AI answer
 MAX_PROMPT = 60_000           # characters; the page sends about 6,000
+ASK_MODEL = "opus"            # Kasun's choice 2026-11-12. An alias, so every Claude Code version resolves it to
+                              # its latest Opus; the user's own default model may be one an older copy doesn't know.
 
 SYSTEM_PROMPT = (
     "You are a macroeconomic analyst helping a private investor read a business-cycle dashboard built on "
@@ -45,12 +50,44 @@ SYSTEM_PROMPT = (
     "'## ' headings, '- ' bullets and **bold** only. Keep it under 350 words unless asked for more."
 )
 
-state = {"refreshing": False, "last_refresh": None, "last_error": None, "asking": False}
+IDLE_STOP_MIN = 30            # --app: stop this many minutes after the page last checked in
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # Windows: no console flashing up for child processes
+
+state = {"refreshing": False, "last_refresh": None, "last_error": None, "asking": False, "last_seen": time.time()}
 lock = threading.Lock()
 
 
+def claude_candidates(home=None, windows=None):
+    """Places Claude Code is installed, besides PATH. An app started by double-click does not get the
+    terminal's PATH, and the Claude desktop app keeps its own copy of Claude Code in its data folder."""
+    home = Path(home) if home else Path.home()
+    windows = (os.name == "nt") if windows is None else windows
+    if windows:
+        roaming = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming")
+        local = Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+        fixed = [home / ".local" / "bin" / "claude.exe", roaming / "npm" / "claude.cmd",
+                 local / "Programs" / "claude" / "claude.exe"]
+        bundled = [p for base in (roaming / "Claude" / "claude-code", local / "Claude" / "claude-code",
+                                  local / "AnthropicClaude" / "claude-code")
+                   for pat in ("*/claude.exe", "*/*/claude.exe", "*/*/*/claude.exe") for p in base.glob(pat)]
+    else:
+        fixed = [home / ".local" / "bin" / "claude", home / ".claude" / "local" / "claude",
+                 Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude"), home / ".npm-global" / "bin" / "claude"]
+        base = home / "Library" / "Application Support" / "Claude" / "claude-code"
+        bundled = [*base.glob("*/*/claude.app/Contents/MacOS/claude"), *base.glob("*/claude")]
+    # newest copy of the desktop app's Claude Code first
+    bundled.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    return fixed + bundled
+
+
 def claude_path():
-    return shutil.which("claude")
+    exe = shutil.which("claude")
+    if exe:
+        return exe
+    for p in claude_candidates():
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
 
 
 def refresh(full=False):
@@ -61,7 +98,7 @@ def refresh(full=False):
         state["refreshing"] = True
     try:
         cmd = [sys.executable, str(ROOT / "bot" / "update.py")] + (["--full"] if full else [])
-        r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=1500)
+        r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=1500, creationflags=NO_WINDOW)
         tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-4:])
         ok = r.returncode == 0
         state["last_error"] = None if ok else tail
@@ -94,9 +131,9 @@ def ask_claude(prompt):
     try:
         with tempfile.TemporaryDirectory() as empty:
             r = subprocess.run(
-                [exe, "-p", "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+                [exe, "-p", "--model", ASK_MODEL, "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
                  "--output-format", "text", "--system-prompt", SYSTEM_PROMPT],
-                input=prompt, cwd=empty, capture_output=True, text=True, timeout=ASK_TIMEOUT)
+                input=prompt, cwd=empty, capture_output=True, text=True, timeout=ASK_TIMEOUT, creationflags=NO_WINDOW)
         out = (r.stdout or "").strip()
         if r.returncode != 0 or not out:
             err = (r.stderr or out or "no output").strip().splitlines()[-1][:300]
@@ -142,6 +179,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        state["last_seen"] = time.time()
         if self.path.split("?")[0] == "/api/status":
             if not self.local_request():
                 return self.send_json({"error": "forbidden"}, 403)
@@ -152,6 +190,7 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        state["last_seen"] = time.time()
         path = self.path.split("?")[0]
         if not self.local_request():
             return self.send_json({"error": "forbidden"}, 403)
@@ -174,12 +213,56 @@ class Handler(SimpleHTTPRequestHandler):
         return self.send_json({"error": "not found"}, 404)
 
 
+def idle_watch(srv, minutes, check_every=30):
+    """--app has no window to close, so stop once no dashboard tab has checked in for a while.
+    An open tab fetches the data every 2 minutes, even in the background."""
+    while True:
+        time.sleep(check_every)
+        if time.time() - state["last_seen"] > minutes * 60 and not (state["asking"] or state["refreshing"]):
+            print(time.strftime("%H:%M"), f"no dashboard tab open for {minutes} minutes, stopping.")
+            srv.shutdown()
+            return
+
+
+def make_shortcut():
+    """Windows: a desktop icon that starts the dashboard with no console window (pythonw ... --app)."""
+    if os.name != "nt":
+        print("The desktop icon is for Windows. On a Mac, double-click 'Economic Dashboard.app' in this folder "
+              "(drag it to the Dock to keep it handy).")
+        return False
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    env = dict(os.environ, EMM_TARGET=str(pyw if pyw.exists() else sys.executable),
+               EMM_ARGS=f'"{ROOT / "run_local.py"}" --app', EMM_DIR=str(ROOT), EMM_ICON=str(ROOT / "icons" / "dashboard.ico"))
+    ps = ("$d=[Environment]::GetFolderPath('Desktop');"
+          "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'Economic Dashboard.lnk'));"
+          "$s.TargetPath=$env:EMM_TARGET;$s.Arguments=$env:EMM_ARGS;$s.WorkingDirectory=$env:EMM_DIR;"
+          "$s.IconLocation=$env:EMM_ICON;$s.Description='Economic Machine Monitor';$s.Save()")
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                       env=env, capture_output=True, text=True, creationflags=NO_WINDOW)
+    if r.returncode != 0:
+        print("Could not create the desktop icon:", (r.stderr or r.stdout).strip()[:300])
+        return False
+    print("An 'Economic Dashboard' icon is on your desktop. Double-click it any time to open the dashboard.")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run the Economic Machine Monitor on this computer.")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true", help="do not open the browser")
     ap.add_argument("--no-refresh", action="store_true", help="serve the data as it is, without running the update bot")
+    ap.add_argument("--app", action="store_true", help="no window: log to local.log, stop when no tab has been open for a while")
+    ap.add_argument("--idle-stop", type=int, default=None, metavar="MIN", help="stop after MIN minutes with no dashboard tab open")
+    ap.add_argument("--make-shortcut", action="store_true", help="Windows: put an 'Economic Dashboard' icon on the desktop")
     a = ap.parse_args()
+    if a.make_shortcut:
+        sys.exit(0 if make_shortcut() else 1)
+    if a.app or sys.stdout is None:          # started from an icon: no window to print to
+        log = open(ROOT / "local.log", "a", buffering=1, encoding="utf-8")
+        sys.stdout = sys.stderr = log
+        print("\n" + time.strftime("%Y-%m-%d %H:%M"), "started from the app icon")
+    if a.app and a.idle_stop is None:
+        a.idle_stop = IDLE_STOP_MIN
     if sys.version_info < (3, 9):
         sys.exit("Python 3.9 or newer is needed. Get it from https://www.python.org/downloads/")
     try:
@@ -198,7 +281,11 @@ def main():
         print("No data yet: the first refresh takes about 4 minutes. The page loads when it finishes.")
     if not a.no_refresh:
         threading.Thread(target=refresh_loop, daemon=True).start()
-        print("Refreshing the data now, then every hour. Leave this window open. Ctrl+C stops it.")
+        print("Refreshing the data now, then every hour." + (
+            f" Stops by itself {a.idle_stop} minutes after the last dashboard tab is closed." if a.idle_stop
+            else " Leave this window open. Ctrl+C stops it."))
+    if a.idle_stop:
+        threading.Thread(target=idle_watch, args=(srv, a.idle_stop), daemon=True).start()
     if not a.no_open:
         threading.Timer(0.8, webbrowser.open, args=(url,)).start()
     try:

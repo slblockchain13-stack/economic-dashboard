@@ -19,9 +19,14 @@ A self-updating dashboard of business cycles for 13 economies plus the world, re
 | `bot/update.py` | Orchestrator. Writes `docs/data/data.json`. |
 | `docs/app.js` | Page shell, charts, World / Opportunities / News / How it works tabs. |
 | `docs/cycles.js` | Countries, Compare and The Machine tabs, cycle charts, Ask AI panel. |
-| `run_local.py` | Local server: static files, `/api/status`, `/api/ask`, `/api/refresh`. |
+| `run_local.py` | Local server: static files, `/api/status`, `/api/ask`, `/api/refresh`. `--app` (used by the icons) logs to `local.log` and stops 30 min after the last tab closes. Finds Claude Code on PATH, in the usual install folders, or inside the Claude desktop app (`claude_candidates`); always asks with `--model opus`. |
+| `Economic Dashboard.app` | Mac app icon. `Contents/MacOS/launch` finds Python, opens the page if already running, else starts `run_local.py --app`. Must stay in this folder. |
+| `icons/`, `tools/make_icons.py` | The app icon, drawn by script; rerun it to change the icon (writes the `.icns` into the app and the Windows `.ico`). Windows desktop shortcut: `run_local.py --make-shortcut`, run by the Windows start file. |
 | `.github/workflows/update.yml` | Hourly run and deploy for the public GitHub Pages copy (not included in the local zip). |
 | `tools/make_pack.py` | Builds the shareable zip. |
+
+## Before any change: pull first
+The hourly GitHub Actions job commits fresh data to `main`, so this folder falls behind GitHub between sessions. **Before editing anything in this folder, stop and ask Kasun to run `git pull` here** (from `/Users/kasunwasala/Documents/CLAUDE/Economic Dashboard/live`), and wait for their confirmation. If `docs/data/data.json` shows as modified, it is safe to discard with `git restore docs/data/data.json` first, since the online job regenerates it. Do not start editing until the pull is confirmed.
 
 ## Rules of the house
 - **Nothing on the page is hand-written.** Phases, stages, levers and summaries are computed from data on every run. Do not add hand-entered assessments or numbers. A rule change goes in `bot/analyze.py` with a test.

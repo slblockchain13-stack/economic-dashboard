@@ -1,0 +1,38 @@
+#!/bin/bash
+# Double-clicked "Economic Dashboard.app": start the dashboard with no Terminal window and open it in
+# the browser. If it is already running, just open the page. The app must stay inside the project
+# folder (drag it to the Dock to keep a shortcut there). The server writes to local.log and stops by
+# itself 30 minutes after the last dashboard tab is closed.
+DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+URL="http://localhost:8765"
+
+say_problem() {
+  osascript -e "display dialog \"$1\" with title \"Economic Dashboard\" buttons {\"OK\"} default button 1 with icon caution" >/dev/null 2>&1
+}
+
+if [ ! -f "$DIR/run_local.py" ]; then
+  say_problem "Economic Dashboard.app must stay inside its project folder, next to run_local.py. Move it back, and drag it to the Dock if you want a shortcut."
+  exit 1
+fi
+
+# A double-clicked app does not get the Terminal's PATH, so look in the usual places for Python 3.
+PY=""
+for c in /opt/homebrew/bin/python3 /usr/local/bin/python3 /Library/Frameworks/Python.framework/Versions/Current/bin/python3; do
+  if [ -x "$c" ]; then PY="$c"; break; fi
+done
+# Apple's own python3 only works once the Command Line Tools are installed; otherwise it pops up an installer.
+if [ -z "$PY" ] && xcode-select -p >/dev/null 2>&1 && [ -x /usr/bin/python3 ]; then PY=/usr/bin/python3; fi
+if [ -z "$PY" ]; then
+  say_problem "Python 3 is needed and was not found. The download page will open now. Install it, then double-click Economic Dashboard again."
+  open "https://www.python.org/downloads/"
+  exit 1
+fi
+
+if curl -s -m 2 "$URL/api/status" | grep -q '"local"'; then
+  open "$URL"
+  exit 0
+fi
+
+cd "$DIR" || exit 1
+nohup "$PY" "$DIR/run_local.py" --app >/dev/null 2>&1 &
+exit 0

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT.parent / "Economic-Machine-Monitor-Local.zip"
 TOP = "Economic-Machine-Monitor"
 SKIP_DIRS = {".git", "__pycache__", ".claude", ".github"}
-SKIP_FILES = {".DS_Store", ".gitignore"}
+SKIP_FILES = {".DS_Store", ".gitignore", "local.log"}
 EXECUTABLE = {".command", ".py"}
 
 
@@ -27,7 +27,8 @@ def main():
         for p in files:
             info = zipfile.ZipInfo(f"{TOP}/{p.relative_to(ROOT).as_posix()}", time.localtime(p.stat().st_mtime)[:6])
             info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = (0o755 if p.suffix in EXECUTABLE else 0o644) << 16   # keep the Mac start file double-clickable
+            run = p.suffix in EXECUTABLE or p.parent.name == "MacOS"                  # start file and the app's launcher
+            info.external_attr = (0o755 if run else 0o644) << 16                        # keep them double-clickable
             z.writestr(info, p.read_bytes())
     print(f"{out}  ·  {len(files)} files  ·  {out.stat().st_size / 1024:.0f} KB")
 

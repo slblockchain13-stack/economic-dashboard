@@ -13,29 +13,40 @@ What you need
   An internet connection, so it can fetch data.
 
 How to start it
-  Mac:      double-click  "Start Dashboard (Mac).command"
-            The first time, macOS may refuse to open it. If so, right-click
-            the file, choose Open, then Open again.
-  Windows:  double-click  "Start Dashboard (Windows).bat"
+  Mac:      double-click  "Economic Dashboard"  (the app with the wave icon, in
+            this folder). Drag it to the Dock to keep it handy, but leave the
+            app itself in this folder. The first time, macOS may refuse to
+            open it. If so, right-click it, choose Open, then Open again.
+  Windows:  double-click  "Start Dashboard (Windows).bat"  once. It puts an
+            "Economic Dashboard" icon on your desktop; from then on use that.
             If Windows shows a blue warning, click "More info", then "Run anyway".
   Linux, or from a terminal anywhere:   python3 run_local.py
 
-  A window opens and stays open, and your browser shows the dashboard at
-  http://localhost:8765 . The numbers shown at first are the ones saved when
-  this folder was packed. A refresh starts straight away and the page updates
-  by itself when it finishes (under a minute; about 4 minutes once a day when
-  the slower economic data is due).
+  Your browser opens the dashboard at http://localhost:8765 . No window stays
+  open when you start it from the icon. Double-clicking the icon again while it
+  is running just opens the page again. The numbers shown at first are the
+  ones saved last time; a refresh starts straight away and the page updates by
+  itself when it finishes (under a minute; about 4 minutes once a day when the
+  slower economic data is due). While it runs it refreshes every hour.
+
+  Prefer a window that shows what it is doing? On a Mac, double-click
+  "Start Dashboard (Mac).command" instead.
 
 How to stop it
-  Close that window, or press Ctrl+C in it.
+  Started from the icon: just close the dashboard tab. It stops by itself 30
+  minutes after the last dashboard tab is closed. A record of what it did is
+  in local.log in this folder.
+  Started from a start file or a terminal: close that window, or press Ctrl+C.
 
 Ask AI
   Every country page, the World page and the Compare page have an "Ask AI" box.
   - "Copy for Claude or ChatGPT" copies the page's figures and your question.
     Paste it into the Claude or ChatGPT app. Works with any account.
-  - "Ask Claude" appears if Claude Code (https://claude.com/claude-code) is
-    installed and signed in on this computer. The answer then shows on the
-    page. It uses your Claude subscription; no API key is needed.
+  - "Ask Claude" appears if Claude Code is on this computer: either the
+    Claude desktop app (Mac or Windows) or Claude Code installed on its own
+    (https://claude.com/claude-code), signed in. The answer then shows on the
+    page. It always uses Claude's Opus model and your Claude subscription;
+    no API key is needed.
   AI answers are a reading of the data, not investment advice.
 
 Changing it

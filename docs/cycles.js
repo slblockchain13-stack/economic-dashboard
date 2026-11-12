@@ -177,6 +177,13 @@ function renderCountry(v) {
         <div class="pills" style="margin-top:10px">${cliPill(n.cli)}${stPill("Stocks", sc.equities.stance)}${stPill("Bonds", sc.bonds.stance)}${stPill("Currency", sc.currency.stance)}</div></div>
     </div></section>
   ${aiPanel("country")}
+  ${c.monthly_view ? `<section class="panel" id="inflmode"><div class="panel-head"><div><span class="eyebrow">Inflation figure behind the cycle call</span><h2>Annual or monthly figures for ${esc(c.name)}?</h2></div>
+    <p>${esc(c.name)} is the one economy here with a fresh official monthly inflation figure. The annual figure is the IMF's average for ${Y}, the same basis as every other economy. The monthly figure is the latest year-on-year reading from the central bank, which reacts sooner but swings more.</p></div>
+    <div class="seg" role="group" aria-label="Inflation figure used">
+      <button class="btn ${state.inflMode !== "monthly" ? "primary" : ""}" data-mode="annual" aria-pressed="${state.inflMode !== "monthly"}" type="button">Use annual figures · ${f(c.monthly_view.annual_cpi)}% for ${Y} (IMF)</button>
+      <button class="btn ${state.inflMode === "monthly" ? "primary" : ""}" data-mode="monthly" aria-pressed="${state.inflMode === "monthly"}" type="button">Use monthly figures · ${f(c.monthly_view.monthly_cpi)}% in ${fmtMonth(c.monthly_view.month)} (CBSL)</button>
+    </div>
+    <p class="rule-fired" style="margin-top:10px">With annual figures ${Y} reads as <b>${PH[D.economies[k].now.phase] || "n/a"}</b>; with monthly figures it reads as <b>${PH[c.monthly_view.phase] || "n/a"}</b>. Your choice changes the cycle phase, the summary, the investment screen and the Ask AI brief for ${esc(c.name)} on every tab, and is remembered on this device. Past years always use annual figures.</p></section>` : ""}
 
   <section class="panel"><div class="panel-head"><div><span class="eyebrow">Cycle timeline</span><h2>${esc(c.name)}, 2000–${Y}</h2></div><p>Each block is a year coloured by the engine's phase. The last, lighter block is ${Y} on IMF projections. Numbered pins mark the events listed below. Grey years lack enough data to call.</p></div>
     <div class="ribbon-wrap" id="ribbon"></div><span class="ribbon-hint">Swipe the timeline to see earlier years.</span>
@@ -228,11 +235,12 @@ function renderCountry(v) {
   </section>
 
   <section class="panel"><div class="panel-head"><div><span class="eyebrow">Data notes</span><h2>What to know about this country's figures</h2></div></div>
-    <ul class="notes">${(c.notes.length ? c.notes : ["No special caveats. All figures come straight from the listed sources."]).concat(dataNotes(k)).map(t => `<li>${esc(t)}</li>`).join("")}</ul>
+    <ul class="notes">${c.notes.concat(dataNotes(k)).map(t => `<li>${esc(t)}</li>`).join("")}</ul>
     <p class="cap" style="margin-top:10px">Sources: ${Object.values(c.sources).map(esc).join(" · ")}</p></section>`;
 
   v.querySelectorAll(".chips[role=group] .chip").forEach(b => b.onclick = () => go("country/" + b.dataset.k));
   wireAi("country");
+  v.querySelectorAll("#inflmode [data-mode]").forEach(b => b.onclick = () => { state.inflMode = b.dataset.mode; save(); const y = scrollY; renderCountry(v); scrollTo(0, y); });
   const evs = ribbonSvg($("#ribbon"), [{k, label: ""}], 2000);
   $("#evlist").innerHTML = evs.map((e, i) => `<span><b>${i + 1}</b>${e[0]} · ${esc(e[1])}</span>`).join("");
 
@@ -289,6 +297,9 @@ function dataNotes(k) {
   if (!c.monthly.cli) out.push("The OECD does not publish a leading indicator for this economy.");
   if (!s.dsr) out.push("No BIS debt service ratio for this economy.");
   if (!s.prod) out.push("No productivity series, so the third rule of thumb cannot be checked.");
+  if (s.lshare) out.push(k === "EA" ? "Rule 2 uses Eurostat's compensation of employees as a share of GDP. It leaves out the self-employed, so its level is lower than the labour agency's figures for single countries; only its change is used." : "Rule 2 uses the International Labour Organization's labour income share. The latest one or two years are the agency's modelled estimates and get revised.");
+  else out.push("No labour income share is published for this economy, so the second rule of thumb cannot be checked.");
+  if (c.monthly_view) out.push(`The cycle call for ${D.year} can use either the IMF annual inflation figure or the latest monthly figure from the central bank; the switch is under Ask AI on this page.`);
   out.push(`${D.year} growth and inflation are IMF projections; years up to ${LA} are published figures.`);
   out.push("The deleveraging levers are read from budget, revenue, debt and interest-rate data. Free sources do not carry central-bank balance sheets, so money printing is judged from the policy rate against inflation.");
   return out;
@@ -336,6 +347,7 @@ function renderCompare(v) {
     ["Debt service ratio", k => lat(k, "dsr"), "%", "lo"],
     ["Rules of thumb"],
     ["Private credit/GDP, 1-year change", cr1, "pt", "lo"],
+    ["Labour income share, 1-year change", k => { const r = (E(k).now.rules || [])[1]; return r && r.st !== "na" ? {v: r.bars[0][1], y: r.year} : null; }, "pt", "lo"],
     ["Productivity growth, last 5 years", pr, "%", "hi"],
     ["External"],
     ["Current account", k => E(k).now.metrics.ca == null ? null : {v: E(k).now.metrics.ca, y: Y + "e"}, "% GDP", "hi"],
@@ -424,7 +436,7 @@ function renderMachine(v) {
       <p>Balance the deflationary three with the inflationary one so that nominal growth stays above the nominal interest rate. Dalio calls that a <b>beautiful deleveraging</b>.</p></div>
     <div class="panel prose"><h2>Three rules of thumb</h2>
       <p><b>1. Don't let debt rise faster than income.</b> Measured as the change in private credit as a share of GDP: if the ratio rises, debt is outgrowing income.</p>
-      <p><b>2. Don't let income rise faster than productivity.</b> Needs real wage data, which the free sources don't carry consistently for every economy, so it is shown as not measured.</p>
+      <p><b>2. Don't let income rise faster than productivity.</b> Measured with the labour income share: the part of national income paid to people for their work (International Labour Organization, UN indicator 10.4.1; Eurostat for the euro area). The share's growth is income growth minus productivity growth, so a rising share means incomes are outgrowing productivity. A move of 0.2 points or less counts as steady.</p>
       <p><b>3. Do all you can to raise productivity.</b> Growth in output per worker over the last five years against the fifteen before.</p>
       <p class="muted" style="font-size:13px">After Ray Dalio, "How the Economic Machine Works". The rules here are this dashboard's own simplification of that framework.</p></div>
   </section>`;
@@ -453,6 +465,7 @@ function briefEconomy(k, short) {
   L.push("Signals (value, period, context, health):");
   signals(k).forEach(t => L.push(`- ${t.key}: ${t.val}${t.unit ? " " + t.unit : ""} (${t.per || "latest"}) — ${t.ctx}${t.tone ? ` [${{good: "healthy", warn: "watch", bad: "warning"}[t.tone]}]` : ""}`));
   L.push(`Rules of thumb: ${(n.rules || []).map((r, i) => `${i + 1}) ${r.msg}`).join(" ")}`);
+  if (c.monthly_view) L.push(`Note: the ${Y} cycle call above uses ${state.inflMode === "monthly" ? `the latest monthly inflation (${f(c.monthly_view.monthly_cpi)}%, ${c.monthly_view.month}); on the IMF annual figure (${f(c.monthly_view.annual_cpi)}%) it would read ${PH[D.economies[k].now.phase] || "n/a"}` : `the IMF annual inflation figure (${f(c.monthly_view.annual_cpi)}%); on the latest monthly figure (${f(c.monthly_view.monthly_cpi)}%, ${c.monthly_view.month}) it would read ${PH[c.monthly_view.phase] || "n/a"}`}.`);
   if (n.levers) L.push(`Deleveraging levers: ${n.levers.levers.map(l => `${l.name}: ${l.label} (${l.note})`).join("; ")}.${n.levers.verdict ? " " + n.levers.verdict : ""}`);
   L.push(`Mechanical investment screen (not advice): stocks ${sc.equities.stance} (${sc.equities.why.join("; ") || "no strong signal"}); bonds ${sc.bonds.stance} (${sc.bonds.why.join("; ") || "no strong signal"}); currency ${sc.currency.stance} (${sc.currency.why.join("; ") || "no strong signal"}). Risks flagged: ${sc.risks.join("; ") || "none"}.`);
   if (!short) {

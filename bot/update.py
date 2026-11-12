@@ -31,7 +31,7 @@ LAST_ACTUAL = YEAR - 1
 HIST_FROM = 1995
 MACRO_MAX_AGE = 20 * 3600
 NO_DSR = {"XM", "SG"}                    # BIS publishes no debt service ratio for these: asking only raises a false alarm
-MACRO_VERSION = 4                        # raise when fetch_macro gains a series, to force one full refresh
+MACRO_VERSION = 5                        # raise when fetch_macro gains a series, to force one full refresh
 ACCUMULATE = {"y10", "cpi_m"}            # monthly series merged with the previous run
 PROD_SRC = "World Bank / ILO · growth in output per worker"
 Y10_LABEL = {
@@ -111,6 +111,8 @@ def fetch_macro():
                       ("prodlvl", "SL.GDP.PCAP.EM.KD")]:
         wb[name] = S.world_bank(ind, codes_wb, HIST_FROM - 12)
         print("  wb", name, sum(1 for v in wb[name].values() if v))
+    lshare = O.ilo_labour_share([c["iso3"] for c in COUNTRIES])
+    print("  ilo labour share", len(lshare))
     cli = S.oecd_cli([c["oecd"] for c in COUNTRIES if c["oecd"]] + [WORLD["oecd"], "G7"])
     print("  oecd cli", len(cli))
 
@@ -173,7 +175,14 @@ def fetch_macro():
             if ccpi:
                 mon["cpi_m"] = ccpi
                 src["cpi_m"] = "Central Bank of Sri Lanka · CCPI inflation, year on year, monthly"
+        if lshare.get(c["iso3"]):
+            s["lshare"] = lshare[c["iso3"]]
+            src["lshare"] = "International Labour Organization · labour income share of GDP (UN indicator 10.4.1; recent years are modelled estimates)"
         if k == "EA":
+            ws = O.eurostat_wage_share()
+            if ws:
+                s["lshare"] = ws
+                src["lshare"] = "Eurostat · compensation of employees as a share of GDP (the labour agency publishes no euro-area figure)"
             esi = O.eurostat_esi()
             if esi:
                 mon["cli"] = esi
@@ -438,7 +447,8 @@ def build(prev, full):
             "crisis": crisis, "year": YEAR, "private_chg_5y": c5, "rev": rev_s.get(YEAR), "rev_5y": rev_s.get(YEAR - 5),
             "real_rate": real, "nominal": nominal, "rate": r_now, "rate_label": r_label.lower()})
         rules = A.rules_of_thumb(credit, s.get("prod", {}), LAST_ACTUAL,
-                                 "output per worker" if raw["sources"].get("prod") == PROD_SRC else "output per person")
+                                 "output per worker" if raw["sources"].get("prod") == PROD_SRC else "output per person",
+                                 s.get("lshare"), "employees' pay as a share of GDP" if k == "EA" else "workers' share of national income")
         tone = N.tone_summary(news.get(k, []))
         e = eq.get(k)
         res = s.get("res", {})
@@ -468,6 +478,14 @@ def build(prev, full):
             "phases": sk(ph_hist), "phase_detail": sk(ph_det), "now": now, "screen": scr,
         }
         economies[k]["summary"] = A.summary(c, now, YEAR)
+        if cpi_latest and inputs.get("gdp") is not None:
+            # second reading of the current year, with the latest monthly inflation in place of the annual average
+            ph_m = A.phase(inputs["gdp"], inputs["gdp_prev"], inputs["trend"], cpi_latest["value"], inputs["target"], inputs["rate_chg"])
+            in_m = {**inputs, "cpi": cpi_latest["value"], "cpi_month": cpi_latest["month"]}
+            scr_m = A.screen({**metrics, "phase": ph_m, "cpi": cpi_latest["value"]})
+            economies[k]["monthly_view"] = {"phase": ph_m, "inputs": in_m, "screen": scr_m, "month": cpi_latest["month"],
+                                            "annual_cpi": inputs.get("cpi"), "monthly_cpi": cpi_latest["value"],
+                                            "summary": A.summary(c, {**now, "phase": ph_m, "inputs": in_m}, YEAR)}
 
     # world
     ws = {n: ik(v) for n, v in world_raw["series"].items()}

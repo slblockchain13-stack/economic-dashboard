@@ -9,6 +9,8 @@ national authority that publishes them.
   Singapore   10-year SGS benchmark yield        Monetary Authority of Singapore (eservices.mas.gov.sg)
   Euro area   economic sentiment indicator       European Commission via Eurostat
   Euro area   10-year government bond yield      European Central Bank yield curve (AAA-rated issuers)
+  All         labour income share of GDP          International Labour Organization (UN indicator 10.4.1)
+  Euro area   compensation of employees / GDP     Eurostat national accounts
 
 Every function has a pure parser (unit-tested with samples) and a thin fetcher. A parser returns
 only values inside a sane range; anything else is dropped and logged, so a changed page layout
@@ -394,3 +396,61 @@ def ecb_y10(start="2005-01-01"):
         _log("ECB", False, f"yield curve: {e}")
         return None
     return out if out and len(out) >= 24 else None
+
+
+# ---------- Labour income share: are incomes growing faster than productivity? ----------
+def parse_ilo_share(text, areas):
+    """ILO SDMX CSV of the labour income share (% of GDP). {iso3: {year: value}} for the areas asked for."""
+    out = defaultdict(dict)
+    want = set(areas)
+    for r in csv.DictReader(io.StringIO(text)):
+        v = num(r.get("OBS_VALUE"))
+        if r.get("REF_AREA") in want and v is not None and str(r.get("TIME_PERIOD", "")).isdigit():
+            out[r["REF_AREA"]][int(r["TIME_PERIOD"])] = round(v, 2)
+    return {a: sane(d, 10, 90, "ILO labour share") for a, d in out.items()}
+
+
+def ilo_labour_share(iso3s, start=2000):
+    """Labour income share of GDP, including the labour income of the self-employed (ILO modelled estimates;
+    UN Sustainable Development Goal indicator 10.4.1). One request returns every country."""
+    txt = get(f"https://sdmx.ilo.org/rest/data/ILO,DF_LAP_2GDP_NOC_RT,1.0/all?startPeriod={start}&format=csv", ua=UA, tries=2, timeout=120)
+    try:
+        out = parse_ilo_share(txt, iso3s) if txt else {}
+    except Exception as e:  # noqa: BLE001
+        _log("ILO", False, str(e))
+        return {}
+    if len(out) < len(set(iso3s)) / 2:
+        _log("ILO", False, f"labour income share: only {len(out)} of {len(set(iso3s))} economies found")
+    return out
+
+
+def parse_eurostat_share(txt):
+    """Eurostat nama_10_gdp JSON with na_item D1 (compensation of employees) and B1GQ (GDP), one area.
+    Returns {year: D1 / GDP * 100}."""
+    d = json.loads(txt)
+    ids, size, dim, vals = d["id"], d["size"], d["dimension"], d.get("value", {})
+
+    def at(item, t):
+        pos = 0
+        for name, n in zip(ids, size):
+            idx = dim[name]["category"]["index"]
+            pos = pos * n + (idx[item] if name == "na_item" else idx[t] if name == "time" else 0)
+        return vals.get(str(pos))
+    out = {}
+    for t in dim["time"]["category"]["index"]:
+        comp, gdp = at("D1", t), at("B1GQ", t)
+        if comp is not None and gdp:
+            out[int(t)] = round(comp / gdp * 100, 2)
+    return sane(out, 10, 90, "Eurostat wage share")
+
+
+def eurostat_wage_share(since=2000):
+    out = {}
+    for geo in EURO_AREA_CODES:
+        txt = get("https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/nama_10_gdp"
+                  f"?format=JSON&geo={geo}&unit=CP_MEUR&na_item=D1&na_item=B1GQ&sinceTimePeriod={since}", tries=2)
+        try:
+            out.update(parse_eurostat_share(txt) if txt else {})
+        except Exception as e:  # noqa: BLE001
+            _log("Eurostat", False, f"wage share {geo}: {e}")
+    return out or None

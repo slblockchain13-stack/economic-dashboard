@@ -152,6 +152,19 @@ class LeversAndRules(unittest.TestCase):
         self.assertEqual(A.rules_of_thumb({2019: 47.0, 2018: 46.0}, {}, 2025)[0]["st"], "na")   # stale credit data is not judged
         self.assertEqual(A.rules_of_thumb({2025: 105.0, 2024: 102.0}, {}, 2025)[0]["st"], "no")
 
+    def test_rule_two_reads_the_labour_income_share(self):
+        share = {2019: 58.2, 2020: 59.1, 2024: 55.5, 2025: 56.4, 2026: 56.5}
+        r = A.rules_of_thumb({}, {}, 2025, lshare=share)[1]
+        self.assertEqual((r["st"], r["bars"]), ("no", [["Last year", 0.9], ["Last 5 years", -2.7]]))    # 2026 is a projection: not used
+        self.assertIn("faster than productivity", r["msg"])
+        self.assertEqual(A.rules_of_thumb({}, {}, 2025, lshare={2024: 55.0, 2025: 54.4})[1]["st"], "ok")
+        steady = A.rules_of_thumb({}, {}, 2025, lshare={2024: 55.0, 2025: 55.2})[1]
+        self.assertEqual(steady["st"], "ok")                                                           # within 0.2 pt counts as steady
+        self.assertIn("steady", steady["msg"])
+        self.assertEqual(A.rules_of_thumb({}, {}, 2025, lshare={2024: 55.0, 2025: 55.3})[1]["st"], "no")
+        self.assertEqual(A.rules_of_thumb({}, {}, 2025, lshare={2019: 36.0, 2020: 38.0})[1]["st"], "na")   # stale data is not judged
+        self.assertEqual(A.rules_of_thumb({}, {}, 2025)[1]["st"], "na")
+
     def test_phase_details_carry_the_inputs(self):
         s = {"gdp": {y: 2.0 for y in range(2000, 2021)}, "cpi": {y: 2.0 for y in range(2000, 2021)}, "rate": {2019: 2.0, 2020: 0.25}}
         s["gdp"][2020] = -3.0
@@ -241,7 +254,13 @@ class PublishedFile(unittest.TestCase):
                     self.assertIn(key, lt, f"{k} missing lt.{key}")
             self.assertEqual(len(e["now"]["levers"]["levers"]), 4)
             self.assertEqual(len(e["now"]["rules"]), 3)
+            mv = e.get("monthly_view")
+            if mv:
+                for key in ("phase", "inputs", "screen", "summary", "month", "annual_cpi", "monthly_cpi"):
+                    self.assertIn(key, mv, f"{k} missing monthly_view.{key}")
+                self.assertIn(mv["phase"], list(A.PHASES) + [None])
         self.assertGreaterEqual(sum(1 for e in d["economies"].values() if e["now"]["lt"]), 10)
+        self.assertGreaterEqual(sum(1 for e in d["economies"].values() if e["now"]["rules"][1]["st"] != "na"), 10, "rule 2 should be measured for most economies")
 
 
 if __name__ == "__main__":

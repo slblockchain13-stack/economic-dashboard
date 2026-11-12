@@ -279,7 +279,7 @@ def levers(m):
     return {"levers": res, "verdict": verdict}
 
 
-def rules_of_thumb(credit, prod, last, prod_label="output per worker"):
+def rules_of_thumb(credit, prod, last, prod_label="output per worker", lshare=None, lshare_label="workers' share of national income"):
     """Dalio's three rules. credit: private credit % GDP by year; prod: output per worker growth % by year."""
     def chg(n):
         if not credit:
@@ -292,6 +292,23 @@ def rules_of_thumb(credit, prod, last, prod_label="output per worker"):
         return round(sum(v) / len(v), 2) if v else None
     c1, c5 = chg(1), chg(5)
     stale = bool(credit) and max(credit) < last - 2
+    # Rule 2. Labour share = labour income / GDP. Its growth equals income growth minus productivity growth,
+    # so a rising share means incomes are outgrowing productivity. Changes within 0.2 pt count as steady.
+    ly = max((y for y in (lshare or {}) if y <= last), default=None)
+    if ly is None or ly - 1 not in lshare or ly < last - 2:
+        rule2 = {"q": "Incomes growing no faster than productivity?", "unit": "pt", "st": "na", "bars": [],
+                 "msg": "Not measured: no credible labour income data for this economy"}
+    else:
+        d1 = round(lshare[ly] - lshare[ly - 1], 1) + 0.0     # + 0.0 turns -0.0 into 0.0
+        d5 = round(lshare[ly] - lshare[ly - 5], 1) + 0.0 if ly - 5 in lshare else None
+        if abs(d1) <= 0.2:
+            msg = f"Yes: {lshare_label} was steady in {ly} ({lshare[ly]:.1f}%), so incomes grew in line with productivity"
+        elif d1 < 0:
+            msg = f"Yes: {lshare_label} fell {abs(d1):.1f} pts in {ly} (to {lshare[ly]:.1f}%), so incomes grew slower than productivity"
+        else:
+            msg = f"No: {lshare_label} rose {d1:.1f} pts in {ly} (to {lshare[ly]:.1f}%), so incomes grew faster than productivity"
+        rule2 = {"q": "Incomes growing no faster than productivity?", "unit": "pt", "st": "ok" if d1 <= 0.2 else "no",
+                 "bars": [["Last year", d1], ["Last 5 years", d5]], "msg": msg, "level": lshare[ly], "year": ly}
     p5, p15 = avg(last - 4, last), avg(last - 19, last - 5)
     r = [{"q": "Debt growing no faster than income?", "unit": "pt",
           "st": "na" if c1 is None or stale else "ok" if c1["d"] <= 0 else "no",
@@ -299,8 +316,7 @@ def rules_of_thumb(credit, prod, last, prod_label="output per worker"):
           "msg": "No recent private credit data" if c1 is None or stale else
                  (f"Yes: private credit fell {abs(c1['d']):.1f} pts of GDP in {c1['year']}" if c1["d"] <= 0
                   else f"No: private credit rose {c1['d']:.1f} pts of GDP in {c1['year']}")},
-         {"q": "Incomes growing no faster than productivity?", "unit": "%", "st": "na", "bars": [],
-          "msg": "Not measured: no free source carries comparable real wage data for every economy"},
+         rule2,
          {"q": "Productivity holding up?", "unit": "%",
           "st": "na" if p5 is None or p15 is None else "ok" if p5 >= p15 else "no",
           "bars": [[f"{last - 4}–{last}", p5], [f"{last - 19}–{last - 5}", p15]],
@@ -433,8 +449,9 @@ def summary(c, now, year):
     x = now.get("inputs", {})
     parts = []
     if ph:
+        basis = f" in the latest month ({x['cpi_month']})" if x.get("cpi_month") else ""
         parts.append(f"{c['name']} reads as **{PHASES[ph].lower()}** by the cycle rules: {year} growth of {fmt(x.get('gdp'))} (IMF) "
-                     f"against a 10-year trend of {fmt(x.get('trend'))}, with inflation at {fmt(x.get('cpi'))} against a "
+                     f"against a 10-year trend of {fmt(x.get('trend'))}, with inflation at {fmt(x.get('cpi'))}{basis} against a "
                      f"{fmt(x.get('target'), 1)} benchmark.")
     rate, rc = now.get("rate"), x.get("rate_chg")
     if rate is not None:
@@ -449,7 +466,7 @@ def summary(c, now, year):
     if lt:
         parts.append(f"Long-term debt cycle: **{LT_STAGES[lt['stage']].lower()}**. {lt['rule']}.")
     cl = now.get("cpi_latest")
-    if cl:
+    if cl and not x.get("cpi_month"):
         parts.append(f"Latest monthly inflation is {cl['value']:.1f}% ({cl['month']}).")
     eq = now.get("equity")
     if eq and eq.get("ret_12m") is not None:

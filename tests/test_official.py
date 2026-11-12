@@ -113,6 +113,20 @@ class OtherSources(unittest.TestCase):
         txt = "KEY,TIME_PERIOD,OBS_VALUE\nYC.B,2026-11-09,3.27\nYC.B,2026-11-10,3.33\nYC.B,2026-10-30,3.10\nYC.B,2026-10-31,\n"
         self.assertEqual(O.parse_ecb_csv(txt), {"2026-11": 3.3, "2026-10": 3.1})
 
+    def test_ilo_labour_share_keeps_only_the_economies_asked_for(self):
+        txt = ("DATAFLOW,REF_AREA,FREQ,MEASURE,TIME_PERIOD,OBS_VALUE,OBS_STATUS\n"
+               "ILO:X,LKA,A,LAP_2GDP_RT,2024,28.16,M\nILO:X,LKA,A,LAP_2GDP_RT,2025,28.146,M\n"
+               "ILO:X,AFG,A,LAP_2GDP_RT,2025,40.7,I\nILO:X,USA,A,LAP_2GDP_RT,2025,,I\nILO:X,USA,A,LAP_2GDP_RT,2024,555,I\n")
+        self.assertEqual(O.parse_ilo_share(txt, ["LKA", "USA"]), {"LKA": {2024: 28.16, 2025: 28.15}, "USA": {}})
+
+    def test_eurostat_wage_share_is_compensation_over_gdp(self):
+        txt = json.dumps({"id": ["freq", "unit", "na_item", "geo", "time"], "size": [1, 1, 2, 1, 2],
+                          "dimension": {"freq": {"category": {"index": {"A": 0}}}, "unit": {"category": {"index": {"CP_MEUR": 0}}},
+                                        "na_item": {"category": {"index": {"B1GQ": 0, "D1": 1}}}, "geo": {"category": {"index": {"EA21": 0}}},
+                                        "time": {"category": {"index": {"2024": 0, "2025": 1}}}},
+                          "value": {"0": 1000.0, "1": 2000.0, "2": 480.0}})       # GDP 2024, GDP 2025, pay 2024; pay 2025 missing
+        self.assertEqual(O.parse_eurostat_share(txt), {2024: 48.0})
+
     def test_out_of_range_values_are_logged(self):
         n = len(S.LOG)
         self.assertEqual(O.sane({"a": 5.0, "b": 500.0, "c": None}, 0, 40, "test source"), {"a": 5.0})

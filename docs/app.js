@@ -26,9 +26,9 @@ const PLAYBOOK = {
   rec:"Bonds first; equities bottom before the economy does, so watch the leading indicator.",
 };
 
-let D = null, lastGenerated = null, state = {tab:"world", country:"US", year:null, local:null, compare:["US","CN","IN","EA"], metric:"gdp", newsCountry:"ALL", newsTopic:"ALL", newsTone:"ALL", sort:{key:"share", dir:-1}, shareMode:"ppp"};
+let D = null, lastGenerated = null, state = {tab:"world", country:"US", year:null, local:null, inflMode:"annual", compare:["US","CN","IN","EA"], metric:"gdp", newsCountry:"ALL", newsTopic:"ALL", newsTone:"ALL", sort:{key:"share", dir:-1}, shareMode:"ppp"};
 try { const s = JSON.parse(localStorage.getItem("emm-state") || "{}"); Object.assign(state, s); } catch (e) {}
-function save() { try { localStorage.setItem("emm-state", JSON.stringify({compare:state.compare, metric:state.metric, shareMode:state.shareMode})); } catch (e) {} }
+function save() { try { localStorage.setItem("emm-state", JSON.stringify({compare:state.compare, metric:state.metric, shareMode:state.shareMode, inflMode:state.inflMode})); } catch (e) {} }
 
 /* ---------- helpers ---------- */
 const $ = (s, el = document) => el.querySelector(s);
@@ -47,7 +47,16 @@ function ago(ts) {
   if (s < 86400 * 2) return Math.round(s / 3600) + " h ago";
   return Math.round(s / 86400) + " days ago";
 }
-const E = k => D.economies[k];
+/* An economy as the page should show it. Where the bot supplies a second reading of the current year based on the
+   latest monthly inflation (Sri Lanka), the reader chooses which one to use; the choice applies on every tab. */
+let viewCache = {};
+const E = k => {
+  const e = D.economies[k];
+  if (!e || !e.monthly_view || state.inflMode !== "monthly") return e;
+  const key = k + D.generated;
+  if (!viewCache[key]) { const m = e.monthly_view; viewCache = {...viewCache, [key]: {...e, now: {...e.now, phase: m.phase, inputs: m.inputs}, screen: m.screen, summary: m.summary}}; }
+  return viewCache[key];
+};
 const keys = () => Object.keys(D.economies);
 const realKeys = () => keys().filter(k => !E(k).aggregate);
 const name = k => k === "WORLD" ? "World" : (E(k) ? E(k).name : k);
@@ -240,7 +249,7 @@ function newsList(items, showCountry) {
 }
 function renderWorld(v) {
   const w = D.world, n = w.now, Y = D.year;
-  const cnt = n.phase_counts || {};
+  const cnt = {}; realKeys().forEach(k => { const p = E(k).now.phase; if (p) cnt[p] = (cnt[p] || 0) + 1; });
   v.innerHTML = `
   <section><p class="eyebrow">World economy · ${Y}</p><h2 style="margin:4px 0 8px">The global picture</h2><p class="lede">${md(w.summary)}</p></section>
   ${aiPanel("world")}

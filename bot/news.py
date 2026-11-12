@@ -80,8 +80,10 @@ def fetch(query, max_items=14, max_age_days=7, key=None):
         dkey = re.sub(r"[^a-z0-9]", "", it["title"].lower())[:60]
         if dkey in seen or it["ts"] < cutoff or (key and not relevant(it["title"], key)):
             continue
-        seen.add(dkey)
         it["topics"], it["tone"] = classify(it["title"])
+        if key and it["topics"] == ["General"]:
+            continue  # names the country but touches no economic topic
+        seen.add(dkey)
         out.append(it)
         if len(out) >= max_items:
             break

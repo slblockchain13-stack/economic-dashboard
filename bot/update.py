@@ -29,6 +29,7 @@ YEAR = int(time.strftime("%Y", time.gmtime(NOW)))
 LAST_ACTUAL = YEAR - 1
 HIST_FROM = 1995
 MACRO_MAX_AGE = 20 * 3600
+PROD_SRC = "World Bank / ILO · growth in output per worker"
 
 
 def ik(d):
@@ -89,12 +90,14 @@ def fetch_macro():
     codes_wb = [c["iso3"] for c in COUNTRIES] + [WORLD["iso3"]]
     imf = {}
     for name, ind in [("gdp", "NGDP_RPCH"), ("cpi", "PCPIPCH"), ("unemp", "LUR"), ("gov", "GGXWDG_NGDP"),
-                      ("ca", "BCA_NGDPD"), ("gdp_usd", "NGDPD"), ("ppp_share", "PPPSH"), ("gdppc", "NGDPDPC")]:
+                      ("ca", "BCA_NGDPD"), ("gdp_usd", "NGDPD"), ("ppp_share", "PPPSH"), ("gdppc", "NGDPDPC"),
+                      ("bal", "GGXCNL_NGDP"), ("pb", "GGXONLB_G01_GDP_PT"), ("rev", "GGR_G01_GDP_PT"), ("exp", "G_X_G01_GDP_PT"), ("pop", "LP")]:
         imf[name] = S.imf(ind, codes_imf)
         print("  imf", name, sum(1 for v in imf[name].values() if v))
     wb = {}
     for name, ind in [("gdp", "NY.GDP.MKTP.KD.ZG"), ("cpi", "FP.CPI.TOTL.ZG"), ("unemp", "SL.UEM.TOTL.ZS"),
-                      ("ca", "BN.CAB.XOKA.GD.ZS"), ("res", "FI.RES.TOTL.MO"), ("wbcredit", "FS.AST.PRVT.GD.ZS")]:
+                      ("ca", "BN.CAB.XOKA.GD.ZS"), ("res", "FI.RES.TOTL.MO"), ("wbcredit", "FS.AST.PRVT.GD.ZS"),
+                      ("prodlvl", "SL.GDP.PCAP.EM.KD")]:
         wb[name] = S.world_bank(ind, codes_wb, HIST_FROM - 12)
         print("  wb", name, sum(1 for v in wb[name].values() if v))
     cli = S.oecd_cli([c["oecd"] for c in COUNTRIES if c["oecd"]] + [WORLD["oecd"], "G7"])
@@ -121,6 +124,21 @@ def fetch_macro():
         pick("ppp_share", imf["ppp_share"].get(c["imf"]), "IMF WEO · share of world GDP at PPP")
         pick("gdppc", imf["gdppc"].get(c["imf"]), "IMF WEO · GDP per person, US$")
         pick("res", wb["res"].get(c["iso3"]), "World Bank · reserves in months of imports")
+        pick("bal", imf["bal"].get(c["imf"]), "IMF WEO · government budget balance % GDP")
+        pick("pb", imf["pb"].get(c["imf"]), "IMF Fiscal Monitor · primary budget balance % GDP")
+        pick("rev", imf["rev"].get(c["imf"]), "IMF Fiscal Monitor · government revenue % GDP")
+        pick("exp", imf["exp"].get(c["imf"]), "IMF Fiscal Monitor · government spending % GDP")
+        lvl = wb["prodlvl"].get(c["iso3"]) or {}
+        prod = {y: round((lvl[y] / lvl[y - 1] - 1) * 100, 2) for y in lvl if y - 1 in lvl and lvl[y - 1]}
+        if prod:
+            s["prod"] = prod
+            src["prod"] = PROD_SRC
+        else:  # stand-in when the World Bank series does not arrive: growth in real GDP per person
+            g, pop = imf["gdp"].get(c["imf"]) or {}, imf["pop"].get(c["imf"]) or {}
+            alt = {y: round(((1 + g[y] / 100) / (pop[y] / pop[y - 1]) - 1) * 100, 2) for y in g if y <= LAST_ACTUAL and y in pop and pop.get(y - 1)}
+            if alt:
+                s["prod"] = alt
+                src["prod"] = "IMF · growth in real GDP per person (stand-in: the World Bank output-per-worker series did not arrive)"
 
         # BIS: policy rate (monthly), credit and debt service (quarterly)
         if c["bis"]:
@@ -275,7 +293,8 @@ def fetch_news(prev):
 def build(prev, full):
     prev_ok = prev and prev.get("schema") == 2
     macro_age = NOW - (prev.get("macro_fetched_ts", 0) if prev_ok else 0)
-    if full or not prev_ok or macro_age > MACRO_MAX_AGE:
+    has_new = prev_ok and any("rev" in e.get("series", {}) for e in prev["economies"].values())  # series added in the Nov 2026 rebuild
+    if full or not prev_ok or not has_new or macro_age > MACRO_MAX_AGE:
         eco_raw, world_raw = fetch_macro()
         for k in eco_raw:
             pe = prev["economies"].get(k) if prev_ok else None
@@ -287,6 +306,16 @@ def build(prev, full):
         eco_raw = {k: {"series": e["series"], "monthly": e["monthly"], "sources": e["sources"]} for k, e in prev["economies"].items()}
         world_raw = {p: prev["world"][p] for p in ("series", "monthly", "sources")}
         macro_ts = prev["macro_fetched_ts"]
+
+    if any((e["sources"].get("prod") or "") != PROD_SRC for e in eco_raw.values()):
+        # the World Bank API times out now and then: one retry for the productivity series on every run until it lands
+        lvls = S.world_bank("SL.GDP.PCAP.EM.KD", [c["iso3"] for c in COUNTRIES], HIST_FROM - 12)
+        for c in COUNTRIES:
+            lvl = lvls.get(c["iso3"]) or {}
+            prod = {y: round((lvl[y] / lvl[y - 1] - 1) * 100, 2) for y in lvl if y - 1 in lvl and lvl[y - 1]}
+            if prod and c["key"] in eco_raw:
+                eco_raw[c["key"]]["series"]["prod"] = prod
+                eco_raw[c["key"]]["sources"]["prod"] = PROD_SRC
 
     eq, world_eq, markets, fx = fetch_markets(prev if prev_ok else None)
     news = fetch_news(prev if prev_ok else None)
@@ -317,7 +346,8 @@ def build(prev, full):
         if c.get("aggregate"):
             notes.append("Euro area is an aggregate of its member countries, so it overlaps Germany and France in world totals.")
 
-        ph_hist = A.phase_history(k, s, c["target"], 2000, LAST_ACTUAL)
+        ph_det = A.phase_details(k, s, c["target"], 2000, LAST_ACTUAL)
+        ph_hist = {y: d["phase"] for y, d in ph_det.items()}
         ph_now, inputs = A.phase_now(k, s, c["target"], YEAR, latest_rate)
         cli = A.cli_phase(mon.get("cli"))
         gov, credit = s.get("gov", {}), s.get("credit", {})
@@ -327,13 +357,38 @@ def build(prev, full):
         y10_now = y10_m[max(y10_m)] if y10_m else None
         nominal = (s.get("gdp", {}).get(YEAR, 0) + s.get("cpi", {}).get(YEAR, 0)) if s.get("gdp", {}).get(YEAR) is not None and s.get("cpi", {}).get(YEAR) is not None else None
         min_rate = min((v for y, v in s.get("rate", {}).items() if y >= 2008), default=None)
-        lt, stage, lt_why = A.lt_score(gov.get(gy) if gy else None, credit.get(cy) if cy else None,
-                                       gov.get(gy - 10) if gy else None, credit.get(cy - 10) if cy else None,
-                                       min_rate, y10_now if y10_now is not None else latest_rate, nominal,
-                                       k in EMERGING, DEFAULTS.get(k), YEAR,
-                                       "10-year yield" if y10_now is not None else "Policy rate")
-        cpi_now, cpi_prev = s.get("cpi", {}).get(YEAR), s.get("cpi", {}).get(YEAR - 1)
+        backed = bool(c.get("asset_backed"))
+        gdp_s, cpi_s = s.get("gdp", {}), s.get("cpi", {})
+        crisis = A.crisis_year(gdp_s, cpi_s, YEAR, DEFAULTS.get(k))
+        r_now = y10_now if y10_now is not None else latest_rate
+        r_label = "10-year yield" if y10_now is not None else "Policy rate"
+        lt, _, lt_why = A.lt_score(None if backed else (gov.get(gy) if gy else None), credit.get(cy) if cy else None,
+                                   gov.get(gy - 10) if gy else None, credit.get(cy - 10) if cy else None,
+                                   min_rate, r_now, nominal, k in EMERGING, crisis, YEAR, r_label)
+        cpi_now, cpi_prev = cpi_s.get(YEAR), cpi_s.get(YEAR - 1)
         real = round(latest_rate - cpi_now, 2) if latest_rate is not None and cpi_now is not None else None
+        hh_s, dsr_s = s.get("hh", {}), s.get("dsr", {})
+        tot = (lambda y: (0 if backed else gov[y]) + credit[y] if y in credit and (backed or y in gov) else None)
+        c10 = tot(cy) - tot(cy - 10) if cy and tot(cy) is not None and tot(cy - 10) is not None else None
+        c5 = credit[cy] - credit[cy - 5] if cy and cy - 5 in credit else None
+        ltc = A.lt_cycle({
+            "score": lt, "private": credit.get(cy) if cy else None, "hh": hh_s[max(hh_s)] if hh_s else None,
+            "dsr": dsr_s[max(dsr_s)] if dsr_s else None, "total_chg_10y": c10, "private_chg_5y": c5, "min_rate": min_rate,
+            "cpi_avg2": (cpi_now + cpi_prev) / 2 if cpi_now is not None and cpi_prev is not None else None,
+            "cpi_now": cpi_now, "target": c["target"], "crisis": crisis, "year": YEAR,
+            "gdp_last2": [gdp_s.get(LAST_ACTUAL - 1), gdp_s.get(LAST_ACTUAL)], "gov": gov.get(gy) if gy else None,
+            "gov_peak": max((v for y, v in gov.items() if crisis and crisis - 1 <= y <= LAST_ACTUAL), default=None)})
+        if ltc:
+            ltc.update(score=lt, why=lt_why, name=A.LT_STAGES[ltc["stage"]], crisis=crisis,
+                       flags=A.lt_evidence(s, LAST_ACTUAL, crisis, EVENTS.get(k, []), backed))
+        pb_s = s.get("pb") or s.get("bal") or {}
+        rev_s = s.get("rev", {})
+        lev = A.levers({
+            "pb": pb_s.get(YEAR), "pb_3y": pb_s.get(YEAR - 3), "bal_label": "Primary budget balance" if s.get("pb") else "Budget balance",
+            "crisis": crisis, "year": YEAR, "private_chg_5y": c5, "rev": rev_s.get(YEAR), "rev_5y": rev_s.get(YEAR - 5),
+            "real_rate": real, "nominal": nominal, "rate": r_now, "rate_label": r_label.lower()})
+        rules = A.rules_of_thumb(credit, s.get("prod", {}), LAST_ACTUAL,
+                                 "output per worker" if raw["sources"].get("prod") == PROD_SRC else "output per person")
         tone = N.tone_summary(news.get(k, []))
         e = eq.get(k)
         res = s.get("res", {})
@@ -343,14 +398,14 @@ def build(prev, full):
             "phase": ph_now, "cli_phase": cli and cli["phase"], "rate_chg_12m": rate_chg_12m,
             "eq_ret_12m": e and e.get("ret_12m"), "eq_above_200d": e and e.get("above_200d"), "eq_drawdown": e and e.get("drawdown"),
             "news_tone": tone["score"] if tone["n"] >= 5 else None, "real_rate": real, "cpi": cpi_now, "cpi_prev": cpi_prev,
-            "target": c["target"], "y10": y10_now, "gov_debt": gov.get(gy) if gy else None,
+            "target": c["target"], "y10": y10_now, "gov_debt": gov.get(gy) if gy else None, "asset_backed": backed,
             "r_minus_g": round(y10_now - nominal, 2) if y10_now is not None and nominal is not None else None,
             "ca": ca.get(YEAR, ca.get(LAST_ACTUAL)), "reserves_months": res[max(res)] if res else None,
             "fx_chg_12m": (fx.get(k) or {}).get("chg_12m"), "dsr": dsr[max(dsr)] if dsr else None,
         }
         scr = A.screen(metrics)
         now = {"phase": ph_now, "inputs": inputs, "rate": latest_rate, "rate_date": rate_date, "rate_chg_12m": rate_chg_12m,
-               "y10": y10_now, "y10_date": max(y10_m) if y10_m else None, "cli": cli, "lt_score": lt, "lt_stage": stage, "lt_why": lt_why,
+               "y10": y10_now, "y10_date": max(y10_m) if y10_m else None, "cli": cli, "lt": ltc, "levers": lev, "rules": rules, "nominal": A.r1(nominal, 2),
                "equity": e, "fx": fx.get(k), "news_tone": tone, "real_rate": real, "metrics": metrics,
                "share_nominal": round(s["gdp_usd"][YEAR] / world_gdp_usd * 100, 2) if world_gdp_usd and s.get("gdp_usd", {}).get(YEAR) else None,
                "share_ppp": s.get("ppp_share", {}).get(YEAR)}
@@ -360,7 +415,7 @@ def build(prev, full):
             "series": {n: sk({y: v for y, v in d.items() if y >= HIST_FROM - 12}) for n, d in s.items()},
             "monthly": mon, "sources": raw["sources"], "notes": notes,
             "events": sorted(EVENTS.get(k, []) + [g for g in EVENTS["GLOBAL"] if g[0] not in {x[0] for x in EVENTS.get(k, [])}]),
-            "phases": sk(ph_hist), "now": now, "screen": scr,
+            "phases": sk(ph_hist), "phase_detail": sk(ph_det), "now": now, "screen": scr,
         }
         economies[k]["summary"] = A.summary(c, now, YEAR)
 

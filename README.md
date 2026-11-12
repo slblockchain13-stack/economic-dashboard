@@ -2,6 +2,10 @@
 
 A live dashboard of the business cycles of 13 major economies plus the world as a whole. It covers cycle phases, OECD leading indicators, long-term debt cycles, markets, news and rule-based investment screens. It updates itself every hour.
 
+Tabs: **World**, **Countries** (short-term cycle wave with replay, long-term debt cycle curve, signal tiles, Dalio's rules of thumb, deleveraging levers, who owes the debt), **Compare** (up to four economies on both cycles, a scorecard and any measure over time), **The Machine** (the concept and every rule), **Opportunities**, **News**, **How it works** (data health).
+
+Nothing on the page is written by hand. The long-term stage, the levers and the rules of thumb are worked out from the data on every run.
+
 **How it works:** a Python bot (`bot/update.py`) runs on GitHub Actions every hour. It pulls free public data (IMF, World Bank, BIS, OECD, FRED, Yahoo Finance, the Colombo Stock Exchange, ECB FX rates and Google News), applies the rules in `bot/analyze.py`, writes `docs/data/data.json` and republishes the site on GitHub Pages. The page (`docs/`) is plain HTML/JS. It re-checks the data file every 2 minutes and shows a notice when new data lands.
 
 No server, no database, no API keys, no cost.
@@ -39,6 +43,8 @@ Python 3.9+ only, no packages to install. `python3 -m unittest discover -s tests
 | Add or remove a country | `bot/countries.py` → `COUNTRIES` (one line each) |
 | Sri Lanka policy rate (no free feed) | `bot/countries.py` → `LK_POLICY` (add the new year-end value when CBSL moves) |
 | Cycle, debt and screen rules | `bot/analyze.py` (tested in `tests/test_rules.py`) |
+| Long-term stage thresholds, lever ratings | `bot/analyze.py` → `lt_cycle`, `levers` |
+| Page sections for Countries, Compare, The Machine | `docs/cycles.js` |
 | News search terms and tone words | `bot/news.py` |
 | Update frequency | `.github/workflows/update.yml` → `cron` |
 

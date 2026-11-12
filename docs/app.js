@@ -16,7 +16,6 @@ const PH_DESC = {
 };
 const CLI = {expansion:"Expansion", downturn:"Downturn", slowdown:"Slowdown", recovery:"Recovery"};
 const CLI_COLOR = {expansion:"--ph-early", downturn:"--ph-late", slowdown:"--ph-rec", recovery:"--ph-mid"};
-const LT = ["Early: room to borrow", "Mid: debt building", "Late: debt heavy", "Very late: deleveraging pressure"];
 const SERIES_COLORS = ["--s1", "--s2", "--s3", "--s4"];
 const PLAYBOOK = {
   early:"Equities and cyclical sectors usually lead; credit spreads narrow.",
@@ -27,7 +26,7 @@ const PLAYBOOK = {
   rec:"Bonds first; equities bottom before the economy does, so watch the leading indicator.",
 };
 
-let D = null, lastGenerated = null, state = {tab:"world", country:"US", compare:["US","CN","IN","EA"], metric:"gdp", newsCountry:"ALL", newsTopic:"ALL", newsTone:"ALL", sort:{key:"share", dir:-1}, shareMode:"ppp"};
+let D = null, lastGenerated = null, state = {tab:"world", country:"US", year:null, compare:["US","CN","IN","EA"], metric:"gdp", newsCountry:"ALL", newsTopic:"ALL", newsTone:"ALL", sort:{key:"share", dir:-1}, shareMode:"ppp"};
 try { const s = JSON.parse(localStorage.getItem("emm-state") || "{}"); Object.assign(state, s); } catch (e) {}
 function save() { try { localStorage.setItem("emm-state", JSON.stringify({compare:state.compare, metric:state.metric, shareMode:state.shareMode})); } catch (e) {} }
 
@@ -208,7 +207,7 @@ async function load(first) {
 function go(h) { location.hash = h; }
 function route() {
   const h = (location.hash || "#world").slice(1).split("/");
-  state.tab = ["world", "country", "compare", "opportunities", "news", "method"].includes(h[0]) ? h[0] : "world";
+  state.tab = ["world", "country", "compare", "machine", "opportunities", "news", "method"].includes(h[0]) ? h[0] : "world";
   if (state.tab === "country" && h[1] && D && D.economies[h[1]]) state.country = h[1];
   document.querySelectorAll("#tabs a").forEach(a => a.setAttribute("aria-current", a.getAttribute("href") === "#" + state.tab ? "page" : "false"));
   render(); window.scrollTo({top: 0});
@@ -216,7 +215,7 @@ function route() {
 function render() {
   if (!D) return;
   const v = $("#view");
-  ({world: renderWorld, country: renderCountry, compare: renderCompare, opportunities: renderOpps, news: renderNews, method: renderMethod})[state.tab](v);
+  ({world: renderWorld, country: renderCountry, compare: renderCompare, machine: renderMachine, opportunities: renderOpps, news: renderNews, method: renderMethod})[state.tab](v);
   v.insertAdjacentHTML("beforeend", `<footer><span>Data: IMF, World Bank, BIS, OECD, FRED, Yahoo Finance, CSE, ECB, Google News.</span><span>Generated ${esc(new Date(D.generated_ts * 1000).toUTCString())}.</span><span>Educational tool: rule-based signals, not investment advice.</span></footer>`);
 }
 
@@ -231,7 +230,7 @@ function marketTiles() {
 function changesFeed(filterKey) {
   const list = (D.changes || []).filter(c => !filterKey || c.key === filterKey).slice(0, 40);
   if (!list.length) return `<p class="muted small">No changes logged yet. The bot compares each run with the last one and lists what moved here: cycle phases, rate decisions, leading-indicator releases and big market moves.</p>`;
-  return `<div class="feed">${list.map(c => `<div class="item"><span class="tone z" title="${esc(c.kind)}">${{cycle: "◔", cli: "↗", rates: "%", screen: "★", markets: "≋"}[c.kind] || "•"}</span><span class="t">${esc(c.text)}</span><span class="m"><span>${ago(c.ts)}</span><span class="tag">${esc(c.kind)}</span></span></div>`).join("")}</div>`;
+  return `<div class="feed">${list.map(c => `<div class="item"><span class="tone z" title="${esc(c.kind)}">${{cycle: "◔", cli: "↗", rates: "%", screen: "★", markets: "≋", debt: "∿"}[c.kind] || "•"}</span><span class="t">${esc(c.text)}</span><span class="m"><span>${ago(c.ts)}</span><span class="tag">${esc(c.kind)}</span></span></div>`).join("")}</div>`;
 }
 function newsList(items, showCountry) {
   if (!items || !items.length) return `<p class="muted small">No headlines right now.</p>`;
@@ -303,7 +302,7 @@ const COLS = [
   {k: "eq", t: "Stocks 1y", v: k => E(k).now.equity && E(k).now.equity.ret_12m, h: function (k) { const x = this.v(k); return `<span class="${updn(x)}">${sgn(x)}</span>`; }},
   {k: "phase", t: "Cycle phase", l: true, v: k => Object.keys(PH).indexOf(E(k).now.phase), h: k => phasePill(E(k).now.phase)},
   {k: "cli", t: "Leading ind.", l: true, v: k => E(k).now.cli ? E(k).now.cli.level : null, h: k => E(k).now.cli ? cliPill(E(k).now.cli).replace("Leading: ", "") : `<span class="muted">n/a</span>`},
-  {k: "lt", t: "Debt cycle", l: true, v: k => E(k).now.lt_score, h: k => E(k).now.lt_stage != null ? esc(LT[E(k).now.lt_stage].split(":")[0]) : "–"},
+  {k: "lt", t: "Long-term debt cycle", l: true, v: k => E(k).now.lt ? E(k).now.lt.pos : null, h: k => { const l = E(k).now.lt; return l ? `<span class="pill" title="${esc(l.rule)}" style="--c:var(${LTS[l.stage].c})"><i></i>${esc(LTS[l.stage].s)}</span>` : "–"; }},
   {k: "score", t: "Screen", v: k => E(k).screen.score100, h: k => `<b class="num">${E(k).screen.score100}</b>`},
 ];
 function drawTable() {
@@ -315,125 +314,8 @@ function drawTable() {
   document.querySelectorAll("#cmpTable tbody tr").forEach(tr => tr.onclick = () => go("country/" + tr.dataset.k));
 }
 
-/* ---------- COUNTRY ---------- */
-function renderCountry(v) {
-  const k = state.country, c = E(k), n = c.now, x = n.inputs || {}, Y = D.year, sc = c.screen;
-  const eq = n.equity || {}, fx = n.fx || {};
-  const yrs = []; for (let y = 2000; y <= D.last_actual; y++) yrs.push(y);
-  v.innerHTML = `
-  <section><div class="chips" role="group" aria-label="Choose economy">${keys().map(kk => `<button class="chip" aria-pressed="${kk === k}" data-k="${kk}">${flag(kk)} ${esc(name(kk))}</button>`).join("")}</div></section>
-  <section><p class="eyebrow">${esc(c.region)} · ${esc(c.cb)}</p><h2 style="margin:4px 0 8px;font-size:26px">${c.flag} ${esc(c.name)}</h2>
-    <div class="pills" style="margin-bottom:10px">${phasePill(n.phase)}${cliPill(n.cli)}${n.lt_stage != null ? `<span class="pill" title="${esc(LT[n.lt_stage])}">Debt cycle: ${esc(LT[n.lt_stage].split(":")[0])}</span>` : ""}${stPill("Stocks", sc.equities.stance)}${stPill("Bonds", sc.bonds.stance)}${stPill("Currency", sc.currency.stance)}</div>
-    <p class="lede">${md(c.summary)}</p></section>
-  <section class="tiles">
-    ${tile(`GDP growth ${Y} (IMF)`, fp(x.gdp), `10-yr trend ${fp(x.trend)}`)}
-    ${tile(`Inflation ${Y}`, fp(x.cpi), `Target ${fp(c.target)}`)}
-    ${tile("Policy rate", fp(n.rate, 2), n.rate_date ? `${n.rate_date} · 12m ${sgn(n.rate_chg_12m, 2, "")}` : "No policy rate")}
-    ${tile("Real policy rate", fp(n.real_rate), "Rate minus inflation")}
-    ${tile("10-year bond yield", fp(n.y10, 2), n.y10_date || "No free source")}
-    ${tile("Unemployment", fp(last(c.series.unemp, Y)), `${Y} (IMF)`)}
-    ${tile("Government debt", fp(n.metrics.gov_debt, 0), "% of GDP")}
-    ${tile("Private credit", fp(lastv(c.series.credit), 0), "% of GDP (BIS)")}
-    ${tile("Current account", fp(n.metrics.ca), "% of GDP")}
-    ${tile("FX reserves", f(n.metrics.reserves_months, 1, " mo"), "Months of imports")}
-    ${tile(`${c.ccy} per US$`, fx.per_usd ? big(fx.per_usd) : "–", fx.chg_12m != null ? `<span class="${updn(fx.chg_12m)}">${sgn(fx.chg_12m)}</span> vs USD 1y` : (fx.note || ""))}
-    ${tile(esc(c.index_name), big(eq.price), `<span class="${updn(eq.day_chg)}">${sgn(eq.day_chg, 2)}</span> day · <span class="${updn(eq.ret_12m)}">${sgn(eq.ret_12m)}</span> 1y`)}
-  </section>
-  <section class="panel"><div class="panel-head"><div><h3>Business-cycle phase by year</h3><p>Computed by the rules in "How it works". The last cell is ${Y}, using IMF projections and the latest policy rate. Hover a cell for the reasoning.</p></div>
-    <div class="legend">${Object.keys(PH).map(p => `<span><i class="box" style="--c:var(--ph-${p});opacity:1;border-radius:2px"></i>${PH[p]}</span>`).join("")}</div></div>
-    <div class="ribbon">${yrs.map(y => { const p = c.phases[y]; return `<div class="cell ${p ? "" : "none"}" style="${p ? `--c:var(--ph-${p})` : ""}" title="${y}: ${p ? PH[p] + " — " + PH_DESC[p] : "not enough data"}">${p ? PH_ABBR[p] : "–"}</div>`; }).join("")}<div class="cell proj ${n.phase ? "" : "none"}" style="${n.phase ? `--c:var(--ph-${n.phase})` : ""}" title="${Y} (projection): ${n.phase ? PH[n.phase] : "n/a"}">${n.phase ? PH_ABBR[n.phase] : "–"}</div></div>
-    <div class="yrs">${yrs.map(y => `<span>${String(y).slice(2)}</span>`).join("")}<span>${String(Y).slice(2)}p</span></div></section>
-  <section class="grid g3">
-    <div class="panel"><h3>Stocks: ${sc.equities.stance}</h3>${screenList(sc.equities.why)}<p class="muted small" style="margin-top:8px">${esc(PLAYBOOK[n.phase] || "")}</p></div>
-    <div class="panel"><h3>Bonds: ${sc.bonds.stance}</h3>${screenList(sc.bonds.why)}</div>
-    <div class="panel"><h3>Currency: ${sc.currency.stance}</h3>${screenList(sc.currency.why)}</div>
-  </section>
-  <section class="grid g2">
-    <div class="panel"><div class="panel-head"><div><h3>Risks to watch</h3></div><span class="pill">Screen score <b class="num">${sc.score100}</b>/100</span></div>${sc.risks.length ? `<ul class="why">${sc.risks.map(r => `<li class="risk">${esc(r)}</li>`).join("")}</ul>` : `<p class="muted small">No rule-based red flags right now.</p>`}</div>
-    <div class="panel"><h3>Long-term debt cycle</h3>${n.lt_score != null ? `<div class="meter"><b style="left:${n.lt_score * 100}%"></b></div><div class="scale"><span>Early</span><span>Mid</span><span>Late</span><span>Very late</span></div><p style="margin-top:8px"><b>${esc(LT[n.lt_stage])}</b> (score ${f(n.lt_score, 2)})</p><ul class="why">${n.lt_why.map(t => `<li>${esc(t)}</li>`).join("")}</ul>` : `<p class="muted small">Not enough data.</p>`}</div>
-  </section>
-  <section class="grid g2">
-    <div class="panel"><div class="panel-head"><div><h3>Growth vs trend</h3><p>Real GDP growth with phase shading; dashed years are IMF projections.</p></div></div><div class="chart" id="c-gdp"></div></div>
-    <div class="panel"><div class="panel-head"><div><h3>Inflation vs target</h3><p>CPI inflation, annual average.</p></div></div><div class="chart" id="c-cpi"></div></div>
-    <div class="panel"><div class="panel-head"><div><h3>Policy rate and 10-year yield</h3><p>Monthly. A falling policy rate means easing.</p></div></div><div class="chart" id="c-rate"></div></div>
-    <div class="panel"><div class="panel-head"><div><h3>OECD leading indicator</h3><p>Turns 6–9 months before the economy. 100 = trend.</p></div></div><div class="chart" id="c-cli"></div></div>
-    <div class="panel"><div class="panel-head"><div><h3>Debt, % of GDP</h3><p>Government (IMF), households and companies (BIS).</p></div></div><div class="chart" id="c-debt"></div></div>
-    <div class="panel"><div class="panel-head"><div><h3>${esc(c.index_name)}</h3><p>Daily closes, last 12 months${eq.note ? " · " + esc(eq.note) : ""}.</p></div></div><div class="chart" id="c-eq"></div></div>
-  </section>
-  <section class="grid g2">
-    <div class="panel"><div class="panel-head"><div><h3>Latest news</h3><p>Past 7 days · tone ${n.news_tone.n ? `${n.news_tone.pos} positive, ${n.news_tone.neg} negative of ${n.news_tone.n}` : "n/a"}</p></div></div>${newsList(D.news.by[k])}</div>
-    <div class="panel"><div class="panel-head"><div><h3>What changed</h3></div></div>${changesFeed(k)}
-      ${c.notes.length ? `<h3 style="margin-top:14px">Data notes</h3><ul class="why">${c.notes.map(t => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
-      <h3 style="margin-top:14px">Sources</h3><ul class="why small">${Object.entries(c.sources).map(([kk, s]) => `<li>${esc(s)}</li>`).join("")}</ul></div>
-  </section>`;
-  v.querySelectorAll(".chip").forEach(b => b.onclick = () => go("country/" + b.dataset.k));
-  const gdp = ann(c.series.gdp, 1995);
-  const now = n.phase ? {from: Y - 0.5, to: Y + 0.5, c: "--ph-" + n.phase} : null;
-  lineChart($("#c-gdp"), {series: [{name: "GDP growth", c: "--s1", pts: gdp.filter(p => p[0] >= 2000), dashFrom: Y - 1}, {name: "10-year trend", c: "--ref", dash: true, pts: rolling10(gdp).filter(p => p[0] >= 2000)}], unit: "%", zero: true, bands: phaseBands(c.phases, now), events: c.events, label: "GDP growth",
-    tipExtra: y => c.phases[Math.round(y)] || (Math.round(y) === Y && n.phase) ? `<div class="muted small">${PH[c.phases[Math.round(y)] || n.phase]}</div>` : ""});
-  lineChart($("#c-cpi"), {series: [{name: "Inflation", c: "--s2", pts: ann(c.series.cpi, 2000), dashFrom: Y - 1}], refs: [{y: c.target, label: `Target ${c.target}%`}], unit: "%", zero: true, shadeFrom: Y - 0.5, events: c.events, label: "Inflation"});
-  const rs = [];
-  if (c.monthly.rate) rs.push({name: "Policy rate", c: "--s1", pts: stepify(mon(c.monthly.rate, "2010-01"))});
-  if (c.monthly.y10) rs.push({name: "10-year yield", c: "--s2", pts: mon(c.monthly.y10, "2010-01")});
-  if (rs.length) lineChart($("#c-rate"), {series: rs, unit: "%", zero: true, xfmt: "month", label: "Rates"}); else $("#c-rate").innerHTML = `<p class="muted small">${esc(c.notes[0] || "No free source for rates.")}</p>`;
-  if (c.monthly.cli) lineChart($("#c-cli"), {series: [{name: "Leading indicator", c: "--s3", pts: mon(c.monthly.cli, "2010-01")}], refs: [{y: 100, label: "Trend"}], xfmt: "month", label: "Leading indicator"});
-  else $("#c-cli").innerHTML = `<p class="muted small">The OECD does not publish a leading indicator for ${esc(c.name)}. Use the cycle phase and news instead.</p>`;
-  const ds = [{name: "Government", c: "--s1", pts: ann(c.series.gov, 2000).filter(p => p[0] <= D.last_actual)}];
-  if (c.series.hh) ds.push({name: "Households", c: "--s2", pts: ann(c.series.hh, 2000)});
-  if (c.series.corp) ds.push({name: "Companies", c: "--s3", pts: ann(c.series.corp, 2000)});
-  lineChart($("#c-debt"), {series: ds, unit: "%", label: "Debt"});
-  if (eq.spark && eq.spark.close.length > 1) {
-    const dates = eq.spark.dates, xs = dates.map(dayx);
-    lineChart($("#c-eq"), {series: [{name: c.index_name, c: "--s1", pts: xs.map((x, i) => [x, eq.spark.close[i]])}], xfmt: "day", vfmt: v => big(v), dateOf: x => dates[xs.indexOf(x)] || "", label: c.index_name});
-  } else $("#c-eq").innerHTML = `<p class="muted small">Price history builds up from daily bot runs. Latest: ${big(eq.price)} (${esc(eq.date || "")}).</p>`;
-}
-function stepify(pts) { const out = []; pts.forEach((p, i) => { if (i) out.push([p[0] - 1e-4, pts[i - 1][1]]); out.push(p); }); return out.filter((p, i) => i % 1 === 0); }
+/* Countries, Compare and The Machine tabs live in cycles.js */
 const tile = (k, v, d) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`;
-const last = (s, y) => s ? s[y] ?? s[y - 1] : null;
-const lastv = s => { if (!s) return null; const ks = Object.keys(s).sort(); return s[ks[ks.length - 1]]; };
-const screenList = why => why.length ? `<ul class="why">${why.map(t => `<li>${esc(t)}</li>`).join("")}</ul>` : `<p class="muted small" style="margin-top:6px">No strong signal either way.</p>`;
-
-/* ---------- COMPARE ---------- */
-const METRICS = {
-  gdp: {t: "GDP growth (annual %)", get: k => ann(E(k).series.gdp, 2000), unit: "%", proj: true},
-  cpi: {t: "Inflation (annual %)", get: k => ann(E(k).series.cpi, 2000), unit: "%", proj: true},
-  unemp: {t: "Unemployment rate", get: k => ann(E(k).series.unemp, 2000), unit: "%", proj: true},
-  rate: {t: "Policy rate (monthly)", get: k => mon(E(k).monthly.rate, "2010-01"), unit: "%", m: true},
-  y10: {t: "10-year bond yield (monthly)", get: k => mon(E(k).monthly.y10, "2010-01"), unit: "%", m: true},
-  cli: {t: "OECD leading indicator", get: k => mon(E(k).monthly.cli, "2015-01"), m: true},
-  gov: {t: "Government debt, % of GDP", get: k => ann(E(k).series.gov, 2000), unit: "%", proj: true},
-  credit: {t: "Private credit, % of GDP", get: k => ann(E(k).series.credit, 2000), unit: "%"},
-  ca: {t: "Current account, % of GDP", get: k => ann(E(k).series.ca, 2000), unit: "%", proj: true},
-  eq: {t: "Stock index, rebased to 100 a year ago", get: k => { const e = E(k).now.equity; if (!e || !e.spark || e.spark.close.length < 20) return []; const b = e.spark.close[0]; return e.spark.dates.map((d, i) => [dayx(d), e.spark.close[i] / b * 100]); }, day: true},
-};
-function renderCompare(v) {
-  const sel = state.compare.filter(k => D.economies[k]).slice(0, 4);
-  const mt = METRICS[state.metric] || METRICS.gdp;
-  v.innerHTML = `
-  <section><p class="eyebrow">Compare</p><h2 style="margin:4px 0 8px">Up to four economies side by side</h2></section>
-  <section class="panel"><div class="panel-head"><div><h3>Pick economies</h3><p>${sel.length}/4 selected. Colours stay with the economy.</p></div>
-    <select id="metric" aria-label="Measure">${Object.entries(METRICS).map(([kk, m]) => `<option value="${kk}" ${kk === state.metric ? "selected" : ""}>${m.t}</option>`).join("")}</select></div>
-    <div class="chips">${keys().map(kk => { const i = sel.indexOf(kk); return `<button class="chip" aria-pressed="${i >= 0}" data-k="${kk}">${i >= 0 ? `<span class="sw" style="background:var(${SERIES_COLORS[i]})"></span>` : ""}${flag(kk)} ${esc(name(kk))}</button>`; }).join("")}</div>
-    <div class="chart" id="cmpchart" style="margin-top:14px"></div></section>
-  <section class="tablewrap"><table><thead><tr><th class="l">Measure</th>${sel.map(kk => `<th>${flag(kk)} ${esc(name(kk))}</th>`).join("")}</tr></thead><tbody>${[
-    ["Cycle phase", kk => phasePill(E(kk).now.phase), 1], ["Leading indicator", kk => E(kk).now.cli ? cliPill(E(kk).now.cli).replace("Leading: ", "") : "n/a", 1],
-    ["GDP growth " + D.year, kk => fp(E(kk).now.inputs.gdp)], ["10-year trend", kk => fp(E(kk).now.inputs.trend)], ["Inflation " + D.year, kk => fp(E(kk).now.inputs.cpi)],
-    ["Policy rate", kk => fp(E(kk).now.rate, 2)], ["Real rate", kk => fp(E(kk).now.real_rate)], ["10y yield", kk => fp(E(kk).now.y10, 2)],
-    ["Government debt", kk => fp(E(kk).now.metrics.gov_debt, 0)], ["Current account", kk => fp(E(kk).now.metrics.ca)],
-    ["Debt-cycle stage", kk => E(kk).now.lt_stage != null ? esc(LT[E(kk).now.lt_stage].split(":")[0]) : "–", 1],
-    ["Stocks 1y", kk => sgn(E(kk).now.equity && E(kk).now.equity.ret_12m)], ["Stocks screen", kk => stPill("", E(kk).screen.equities.stance).replace(": ", ""), 1],
-    ["Bonds screen", kk => stPill("", E(kk).screen.bonds.stance).replace(": ", ""), 1], ["Screen score", kk => E(kk).screen.score100],
-  ].map(([lab, fn, raw]) => `<tr style="cursor:default"><td class="l">${lab}</td>${sel.map(kk => `<td class="${raw ? "" : "num"}">${fn(kk)}</td>`).join("")}</tr>`).join("")}</tbody></table></section>`;
-  $("#metric").onchange = e => { state.metric = e.target.value; save(); renderCompare(v); };
-  v.querySelectorAll(".chip").forEach(b => b.onclick = () => {
-    const kk = b.dataset.k, i = state.compare.indexOf(kk);
-    if (i >= 0) state.compare.splice(i, 1); else if (state.compare.length < 4) state.compare.push(kk); else toast("Four at most: remove one first");
-    save(); renderCompare(v);
-  });
-  const series = sel.map((kk, i) => ({name: name(kk), c: SERIES_COLORS[i], pts: mt.get(kk), dashFrom: mt.proj ? D.year - 1 : null}));
-  lineChart($("#cmpchart"), {series, unit: mt.unit || "", zero: !mt.day && state.metric !== "cli", shadeFrom: mt.proj ? D.year - 0.5 : null, xfmt: mt.day ? "day" : mt.m ? "month" : null, legend: true, height: 300, refs: state.metric === "cli" ? [{y: 100, label: "Trend"}] : mt.day ? [{y: 100, label: "A year ago"}] : [], label: mt.t});
-  if (sel.length === 0) $("#cmpchart").innerHTML = `<p class="muted">Pick at least one economy.</p>`;
-}
 
 /* ---------- OPPORTUNITIES ---------- */
 function renderOpps(v) {
@@ -495,7 +377,7 @@ function renderMethod(v) {
       <li><b>Mid expansion</b>: everything else.</li></ul>
       <p class="small muted" style="margin-top:6px">The current year uses IMF projections for growth and inflation and the latest monthly policy rate. Before a central bank adopted an inflation target, the 10-year median inflation is the benchmark.</p></div>
     <div class="panel"><h3>OECD business-cycle clock</h3><p class="small" style="margin-top:6px">The composite leading indicator tracks orders, confidence, spreads and share prices, and turns 6–9 months before GDP. Above 100 and rising is <b>expansion</b>, above 100 and falling is <b>downturn</b>, below 100 and falling is <b>slowdown</b>, below 100 and rising is <b>recovery</b>. Recovery is historically the best entry point for stocks. Uses the 3-month change.</p></div>
-    <div class="panel"><h3>Long-term debt cycle</h3><p class="small" style="margin-top:6px">After Ray Dalio's framework, a 0–1 score from: government debt against an advanced- or emerging-economy yardstick, total non-financial debt, its 10-year change, whether rates have needed the zero bound since 2008, whether bond yields sit above nominal growth, and any sovereign default in the last 10 years. Under 0.3 is early, under 0.5 mid, under 0.7 late, above that very late.</p></div>
+    <div class="panel"><h3>Long-term debt cycle</h3><p class="small" style="margin-top:6px">After Ray Dalio's framework. A 0–1 <b>debt-pressure score</b> comes from government debt against an advanced- or emerging-economy yardstick, total non-financial debt, its 10-year change, whether rates have needed the zero bound since 2008, and whether interest rates sit above nominal growth. The score, plus the signs of a debt crisis and its repair, place each economy on five stages: early, bubble building, top, deleveraging, normalisation. The four deleveraging levers and the three rules of thumb are read from budget, revenue, credit and productivity data. <a href="#machine">The Machine</a> tab lists every rule.</p></div>
     <div class="panel"><h3>Investment screen</h3><p class="small" style="margin-top:6px"><b>Stocks</b>: cycle phase, leading indicator, 12-month rate direction, momentum (above the 200-day average), a dip from the 1-year high while the cycle turns up, and news tone. <b>Bonds</b>: real policy rate, the inflation trend, slowing growth, the yield above inflation, and the debt load. <b>Currency</b>: current account, reserves, real rate and 12-month trend. Over +1.25 is Favourable, under −0.75 is Cautious. Score out of 100 = 50% stocks, 25% bonds, 25% currency.</p></div>
     <div class="panel"><h3>Sources</h3><ul class="why small"><li>IMF World Economic Outlook (DataMapper API): growth, inflation, unemployment, debt, current account, GDP, projections</li><li>World Bank: reserves, fallbacks</li><li>BIS: policy rates, private credit, debt-service ratios</li><li>OECD: composite leading indicators</li><li>FRED (St. Louis Fed): 10-year bond yields</li><li>Yahoo Finance: stock indices, commodities, VIX</li><li>Colombo Stock Exchange: ASPI</li><li>ECB (Frankfurter) and open.er-api: exchange rates</li><li>Google News / Bing News RSS: headlines</li></ul></div>
   </section>

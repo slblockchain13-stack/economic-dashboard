@@ -33,12 +33,20 @@ def get(url, ua="curl/8.7.1", tries=3, timeout=45, data=None, accept="*/*"):
 
 
 # ---------- annual macro ----------
+_WB_FAILS = 0
+
+
 def world_bank(indicator, iso3s, start=1990):
     """{iso3: {year: value}}"""
+    global _WB_FAILS
+    out = defaultdict(dict)
+    if _WB_FAILS >= 2:  # the API is down: don't spend minutes timing out on every indicator; previous values are kept
+        _log("World Bank", False, f"{indicator}: skipped, the API failed twice already this run")
+        return out
     url = (f"https://api.worldbank.org/v2/country/{';'.join(iso3s)}/indicator/{indicator}"
            f"?format=json&per_page=20000&date={start}:2031")
-    txt = get(url)
-    out = defaultdict(dict)
+    txt = get(url, tries=2, timeout=40)
+    _WB_FAILS = 0 if txt else _WB_FAILS + 1
     try:
         data = json.loads(txt) if txt else []
         for row in (data[1] if len(data) > 1 and data[1] else []):

@@ -21,7 +21,7 @@ COUNTRIES = [
     dict(key="BR", name="Brazil", flag="🇧🇷", iso3="BRA", imf="BRA", bis="BR", oecd="BRA", y10=None, index="^BVSP", index_name="Ibovespa", ccy="BRL", target=3.0, cb="Banco Central do Brasil", region="Americas"),
     dict(key="CA", name="Canada", flag="🇨🇦", iso3="CAN", imf="CAN", bis="CA", oecd="CAN", y10="IRLTLT01CAM156N", index="^GSPTSE", index_name="S&P/TSX", ccy="CAD", target=2.0, cb="Bank of Canada", region="Americas"),
     dict(key="AU", name="Australia", flag="🇦🇺", iso3="AUS", imf="AUS", bis="AU", oecd="AUS", y10="IRLTLT01AUM156N", index="^AXJO", index_name="ASX 200", ccy="AUD", target=2.5, cb="Reserve Bank of Australia", region="Asia"),
-    dict(key="SG", name="Singapore", flag="🇸🇬", iso3="SGP", imf="SGP", bis=None, oecd=None, y10=None, index="^STI", index_name="Straits Times", ccy="SGD", target=2.0, cb="Monetary Authority of Singapore", region="Asia", credit_bis="SG"),
+    dict(key="SG", name="Singapore", flag="🇸🇬", iso3="SGP", imf="SGP", bis=None, oecd=None, y10=None, index="^STI", index_name="Straits Times", ccy="SGD", target=2.0, cb="Monetary Authority of Singapore", region="Asia", credit_bis="SG", asset_backed=True),
     dict(key="LK", name="Sri Lanka", flag="🇱🇰", iso3="LKA", imf="LKA", bis=None, oecd=None, y10=None, index="CSE", index_name="CSE All Share", ccy="LKR", target=5.0, cb="Central Bank of Sri Lanka", region="Asia"),
 ]
 
@@ -33,7 +33,9 @@ WORLD = dict(key="WORLD", name="World", iso3="WLD", imf="WEOWORLD", oecd="G20", 
 LK_POLICY = {2015: 6.75, 2016: 7.75, 2017: 8.0, 2018: 8.5, 2019: 7.5, 2020: 5.0,
              2021: 5.5, 2022: 15.0, 2023: 9.5, 2024: 8.0, 2025: 7.75}
 
-# Sovereign defaults within the last decade (feeds the long-term debt score)
+# asset_backed=True: government debt is issued to invest and is matched by larger assets, so it is left out of the debt-pressure score.
+# Known sovereign defaults. The bot also detects a debt crisis from the data itself
+# (output down 5%+ with inflation of 20%+), so this list is only a backstop.
 DEFAULTS = {"LK": 2022}
 EMERGING = {"CN", "IN", "BR", "LK"}
 

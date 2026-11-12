@@ -1,0 +1,51 @@
+ECONOMIC MACHINE MONITOR — running it on your own computer
+===========================================================
+
+What this is
+  A dashboard of the business cycles of 13 major economies and the world.
+  It collects its own data from public sources (IMF, World Bank, central
+  banks, stock exchanges, news) and updates itself every hour while it runs.
+
+What you need
+  Python 3.9 or newer. Nothing else to install.
+    Mac:      usually already there. If not: https://www.python.org/downloads/
+    Windows:  https://www.python.org/downloads/  (tick "Add python.exe to PATH")
+  An internet connection, so it can fetch data.
+
+How to start it
+  Mac:      double-click  "Start Dashboard (Mac).command"
+            The first time, macOS may refuse to open it. If so, right-click
+            the file, choose Open, then Open again.
+  Windows:  double-click  "Start Dashboard (Windows).bat"
+            If Windows shows a blue warning, click "More info", then "Run anyway".
+  Linux, or from a terminal anywhere:   python3 run_local.py
+
+  A window opens and stays open, and your browser shows the dashboard at
+  http://localhost:8765 . The numbers shown at first are the ones saved when
+  this folder was packed. A refresh starts straight away and the page updates
+  by itself when it finishes (under a minute; about 4 minutes once a day when
+  the slower economic data is due).
+
+How to stop it
+  Close that window, or press Ctrl+C in it.
+
+Ask AI
+  Every country page, the World page and the Compare page have an "Ask AI" box.
+  - "Copy for Claude or ChatGPT" copies the page's figures and your question.
+    Paste it into the Claude or ChatGPT app. Works with any account.
+  - "Ask Claude" appears if Claude Code (https://claude.com/claude-code) is
+    installed and signed in on this computer. The answer then shows on the
+    page. It uses your Claude subscription; no API key is needed.
+  AI answers are a reading of the data, not investment advice.
+
+Changing it
+  Open this folder in Claude Code and say what you want changed. The file
+  CLAUDE.md tells Claude how the project is laid out. README.md has a table
+  of the common edits (add a country, change a rule, change a source).
+
+Good to know
+  - Only your own computer can open the dashboard. Nothing is uploaded.
+  - If a data source is down, the last good value stays and a warning shows
+    under "How it works" > Data health.
+  - It is an educational tool. The signals are mechanical rules over public
+    data, not investment advice.

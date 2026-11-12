@@ -26,7 +26,7 @@ const PLAYBOOK = {
   rec:"Bonds first; equities bottom before the economy does, so watch the leading indicator.",
 };
 
-let D = null, lastGenerated = null, state = {tab:"world", country:"US", year:null, compare:["US","CN","IN","EA"], metric:"gdp", newsCountry:"ALL", newsTopic:"ALL", newsTone:"ALL", sort:{key:"share", dir:-1}, shareMode:"ppp"};
+let D = null, lastGenerated = null, state = {tab:"world", country:"US", year:null, local:null, compare:["US","CN","IN","EA"], metric:"gdp", newsCountry:"ALL", newsTopic:"ALL", newsTone:"ALL", sort:{key:"share", dir:-1}, shareMode:"ppp"};
 try { const s = JSON.parse(localStorage.getItem("emm-state") || "{}"); Object.assign(state, s); } catch (e) {}
 function save() { try { localStorage.setItem("emm-state", JSON.stringify({compare:state.compare, metric:state.metric, shareMode:state.shareMode})); } catch (e) {} }
 
@@ -243,6 +243,7 @@ function renderWorld(v) {
   const cnt = n.phase_counts || {};
   v.innerHTML = `
   <section><p class="eyebrow">World economy · ${Y}</p><h2 style="margin:4px 0 8px">The global picture</h2><p class="lede">${md(w.summary)}</p></section>
+  ${aiPanel("world")}
   <section class="tiles">
     <div class="tile"><div class="k">World GDP growth ${Y} (IMF)</div><div class="v">${fp(n.gdp)}</div><div class="d">Trend ${fp(n.trend)} · ${Y - 1}: ${fp(n.gdp_prev)}</div></div>
     <div class="tile"><div class="k">World inflation ${Y}</div><div class="v">${fp(n.cpi)}</div><div class="d">${Y - 1}: ${fp(n.cpi_prev)}</div></div>
@@ -287,6 +288,7 @@ function renderWorld(v) {
   const big4 = ["US", "CN", "DE", "IN"].filter(k => E(k) && E(k).monthly.cli);
   lineChart($("#wcli"), {series: [{name: "G20", c: "--ink", width: 2.5, pts: mon(w.monthly.cli_G20, "2021-07")}, ...big4.map((k, i) => ({name: name(k), c: SERIES_COLORS[i], pts: mon(E(k).monthly.cli, "2021-07")}))], refs: [{y: 100, label: "Trend = 100"}], xfmt: "month", label: "Leading indicators"});
   drawTable();
+  wireAi("world");
 }
 const COLS = [
   {k: "name", t: "Economy", l: true, v: k => name(k), h: k => `${flag(k)} ${esc(name(k))}`},
@@ -367,6 +369,7 @@ function renderMethod(v) {
     <div class="panel"><h3>Data health</h3>
       <p class="small" style="margin-top:6px">Last run: <b>${esc(new Date(D.generated_ts * 1000).toLocaleString())}</b> (${ago(D.generated_ts)}). Economic data last fetched ${ago(D.macro_fetched_ts)}.</p>
       ${bad.length ? `<p class="small" style="margin-top:8px">${bad.length} source warning${bad.length > 1 ? "s" : ""} on the latest run. Each affected series keeps its last good value:</p><ul class="why small">${bad.slice(0, 12).map(h => `<li>${esc(h.source)}: ${esc(h.detail)}</li>`).join("")}</ul>` : `<p class="small up" style="margin-top:8px">All sources responded on the latest run.</p>`}
+      ${state.local ? `<p style="margin-top:10px"><button class="btn" id="refresh-now" type="button">Refresh data now</button> <span class="muted small" id="refresh-status">Running on this computer: data refreshes when the dashboard starts and every hour while its window stays open.</span></p>` : ""}
       <h3 style="margin-top:14px">Update schedule</h3><ul class="why small"><li>Markets, FX, news: every hour</li><li>IMF, World Bank, BIS, OECD, FRED: once a day (they publish monthly to yearly)</li><li>The page re-checks every 2 minutes and shows a notice when new data lands</li></ul></div>
     <div class="panel"><h3>Short-term business cycle (yearly rules, checked in order)</h3><ul class="why">
       <li><b>Recession</b>: growth under 0.5%, more than 3.5 pts under its 10-year trend, or unemployment up more than 0.8 pts.</li>
@@ -382,6 +385,11 @@ function renderMethod(v) {
     <div class="panel"><h3>Sources</h3><ul class="why small"><li>IMF World Economic Outlook (DataMapper API): growth, inflation, unemployment, debt, current account, GDP, projections</li><li>World Bank: reserves, fallbacks</li><li>BIS: policy rates, private credit, debt-service ratios</li><li>OECD: composite leading indicators</li><li>FRED (St. Louis Fed): 10-year bond yields</li><li>Yahoo Finance: stock indices, commodities, VIX</li><li>Colombo Stock Exchange: ASPI</li><li>ECB (Frankfurter) and open.er-api: exchange rates</li><li>Google News / Bing News RSS: headlines</li><li>Central Bank of Sri Lanka: policy rate, Treasury bill and bond yields, monthly CCPI inflation</li><li>Colombo Stock Exchange: All Share index and its history</li><li>China Foreign Exchange Trade System, Tesouro Nacional (Brazil), Monetary Authority of Singapore: 10-year government bond yields</li><li>European Commission via Eurostat: euro-area economic sentiment</li></ul></div>
   </section>
   <section class="disclaimer">Built for education and research. Every label comes from published rules over public data; nothing is hand-picked. Signals are not investment advice.</section>`;
+  const rb = $("#refresh-now");
+  if (rb) rb.onclick = async () => { rb.disabled = true;
+    try { const r = await fetch("api/refresh", {method: "POST", headers: {"Content-Type": "application/json", "X-Dashboard": "local"}, body: "{}"}); $("#refresh-status").textContent = (await r.json()).text; }
+    catch (e) { $("#refresh-status").textContent = "Could not reach the local dashboard server."; }
+    setTimeout(() => { rb.disabled = false; }, 60000); };
 }
 
 /* ---------- boot ---------- */
@@ -396,6 +404,8 @@ function renderMethod(v) {
 })();
 window.addEventListener("hashchange", route);
 let rz, lastW = innerWidth; window.addEventListener("resize", () => { if (innerWidth === lastW) return; lastW = innerWidth; clearTimeout(rz); rz = setTimeout(() => { const y = scrollY; render(); scrollTo(0, y); }, 200); });
+/* served by run_local.py? then the Ask AI button and "Refresh now" are available */
+fetch("api/status", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(s => { if (s && s.local) { state.local = s; if (D) render(); } }).catch(() => {});
 load(true).then(route);
 setInterval(() => load(false), POLL_MS);
 setInterval(setStatus, 30000);

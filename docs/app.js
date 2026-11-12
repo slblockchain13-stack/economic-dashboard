@@ -59,7 +59,7 @@ const dayx = s => { const d = new Date(s + "T00:00:00Z"); return d.getUTCFullYea
 function rolling10(gdp) { const m = new Map(gdp); return gdp.map(([y]) => { const v = []; for (let t = y - 10; t < y; t++) if (m.has(t)) v.push(m.get(t)); return [y, v.length >= 5 ? v.reduce((a, b) => a + b, 0) / v.length : null]; }).filter(p => p[1] != null); }
 const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 const phasePill = p => p ? `<span class="pill" title="${esc(PH_DESC[p])}" style="--c:var(--ph-${p})"><i></i>${PH[p]}</span>` : `<span class="pill"><i></i>Not enough data</span>`;
-const cliPill = c => c ? `<span class="pill" title="OECD leading indicator ${c.level} (${sgn(c.chg3m, 2, "")} over 3 months to ${c.month})" style="--c:var(${CLI_COLOR[c.phase]})"><i></i>Leading: ${CLI[c.phase]}</span>` : "";
+const cliPill = c => c ? `<span class="pill" title="${esc(c.label || "OECD leading indicator")} ${c.level} (${sgn(c.chg3m, 2, "")} over 3 months to ${c.month})" style="--c:var(${CLI_COLOR[c.phase]})"><i></i>Leading: ${CLI[c.phase]}</span>` : "";
 const stPill = (label, st) => `<span class="pill st-${st}">${label}: ${st}</span>`;
 
 /* ---------- charts (SVG, responsive, with hover) ---------- */
@@ -216,7 +216,7 @@ function render() {
   if (!D) return;
   const v = $("#view");
   ({world: renderWorld, country: renderCountry, compare: renderCompare, machine: renderMachine, opportunities: renderOpps, news: renderNews, method: renderMethod})[state.tab](v);
-  v.insertAdjacentHTML("beforeend", `<footer><span>Data: IMF, World Bank, BIS, OECD, FRED, Yahoo Finance, CSE, ECB, Google News.</span><span>Generated ${esc(new Date(D.generated_ts * 1000).toUTCString())}.</span><span>Educational tool: rule-based signals, not investment advice.</span></footer>`);
+  v.insertAdjacentHTML("beforeend", `<footer><span>Data: IMF, World Bank, BIS, OECD, FRED, Eurostat, central banks and treasuries (CBSL, MAS, CFETS, Tesouro Nacional), Yahoo Finance, CSE, ECB, Google News.</span><span>Generated ${esc(new Date(D.generated_ts * 1000).toUTCString())}.</span><span>Educational tool: rule-based signals, not investment advice.</span></footer>`);
 }
 
 /* ---------- WORLD ---------- */
@@ -253,7 +253,7 @@ function renderWorld(v) {
   </section>
   <section><div class="panel-head"><div><h3>Global markets</h3><p>Latest close, day change and 1-year change. Refreshed every hour.</p></div></div>${marketTiles()}</section>
   <section class="grid g2">
-    <div class="panel"><div class="panel-head"><div><h3>Business-cycle clock (OECD leading indicators)</h3><p>Level vs 100 (long-run trend) and the 3-month change. Economies move clockwise: recovery → expansion → downturn → slowdown. Click a dot to open the country.</p></div></div><div class="chart" id="clock"></div></div>
+    <div class="panel"><div class="panel-head"><div><h3>Business-cycle clock (leading indicators)</h3><p>OECD composite leading indicators; the euro area uses the European Commission's sentiment indicator. Level vs 100 (long-run trend) and the 3-month change. Economies move clockwise: recovery → expansion → downturn → slowdown. Click a dot to open the country.</p></div></div><div class="chart" id="clock"></div></div>
     <div class="panel"><div class="panel-head"><div><h3>Growth vs inflation map, ${Y}</h3><p>Growth gap to each economy's 10-year trend, against inflation gap to its target (IMF projections). Top-right is running hot; bottom-left is cooling.</p></div></div><div class="chart" id="gimap"></div></div>
   </section>
   <section class="grid g2">
@@ -379,7 +379,7 @@ function renderMethod(v) {
     <div class="panel"><h3>OECD business-cycle clock</h3><p class="small" style="margin-top:6px">The composite leading indicator tracks orders, confidence, spreads and share prices, and turns 6–9 months before GDP. Above 100 and rising is <b>expansion</b>, above 100 and falling is <b>downturn</b>, below 100 and falling is <b>slowdown</b>, below 100 and rising is <b>recovery</b>. Recovery is historically the best entry point for stocks. Uses the 3-month change.</p></div>
     <div class="panel"><h3>Long-term debt cycle</h3><p class="small" style="margin-top:6px">After Ray Dalio's framework. A 0–1 <b>debt-pressure score</b> comes from government debt against an advanced- or emerging-economy yardstick, total non-financial debt, its 10-year change, whether rates have needed the zero bound since 2008, and whether interest rates sit above nominal growth. The score, plus the signs of a debt crisis and its repair, place each economy on five stages: early, bubble building, top, deleveraging, normalisation. The four deleveraging levers and the three rules of thumb are read from budget, revenue, credit and productivity data. <a href="#machine">The Machine</a> tab lists every rule.</p></div>
     <div class="panel"><h3>Investment screen</h3><p class="small" style="margin-top:6px"><b>Stocks</b>: cycle phase, leading indicator, 12-month rate direction, momentum (above the 200-day average), a dip from the 1-year high while the cycle turns up, and news tone. <b>Bonds</b>: real policy rate, the inflation trend, slowing growth, the yield above inflation, and the debt load. <b>Currency</b>: current account, reserves, real rate and 12-month trend. Over +1.25 is Favourable, under −0.75 is Cautious. Score out of 100 = 50% stocks, 25% bonds, 25% currency.</p></div>
-    <div class="panel"><h3>Sources</h3><ul class="why small"><li>IMF World Economic Outlook (DataMapper API): growth, inflation, unemployment, debt, current account, GDP, projections</li><li>World Bank: reserves, fallbacks</li><li>BIS: policy rates, private credit, debt-service ratios</li><li>OECD: composite leading indicators</li><li>FRED (St. Louis Fed): 10-year bond yields</li><li>Yahoo Finance: stock indices, commodities, VIX</li><li>Colombo Stock Exchange: ASPI</li><li>ECB (Frankfurter) and open.er-api: exchange rates</li><li>Google News / Bing News RSS: headlines</li></ul></div>
+    <div class="panel"><h3>Sources</h3><ul class="why small"><li>IMF World Economic Outlook (DataMapper API): growth, inflation, unemployment, debt, current account, GDP, projections</li><li>World Bank: reserves, fallbacks</li><li>BIS: policy rates, private credit, debt-service ratios</li><li>OECD: composite leading indicators</li><li>FRED (St. Louis Fed): 10-year bond yields</li><li>Yahoo Finance: stock indices, commodities, VIX</li><li>Colombo Stock Exchange: ASPI</li><li>ECB (Frankfurter) and open.er-api: exchange rates</li><li>Google News / Bing News RSS: headlines</li><li>Central Bank of Sri Lanka: policy rate, Treasury bill and bond yields, monthly CCPI inflation</li><li>Colombo Stock Exchange: All Share index and its history</li><li>China Foreign Exchange Trade System, Tesouro Nacional (Brazil), Monetary Authority of Singapore: 10-year government bond yields</li><li>European Commission via Eurostat: euro-area economic sentiment</li></ul></div>
   </section>
   <section class="disclaimer">Built for education and research. Every label comes from published rules over public data; nothing is hand-picked. Signals are not investment advice.</section>`;
 }

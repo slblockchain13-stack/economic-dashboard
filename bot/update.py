@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import analyze as A  # noqa: E402
 import news as N  # noqa: E402
+import official as O  # noqa: E402
 import sources as S  # noqa: E402
 from countries import COUNTRIES, DEFAULTS, EMERGING, EVENTS, GLOBAL_MARKETS, LK_POLICY, WORLD  # noqa: E402
 
@@ -29,7 +30,17 @@ YEAR = int(time.strftime("%Y", time.gmtime(NOW)))
 LAST_ACTUAL = YEAR - 1
 HIST_FROM = 1995
 MACRO_MAX_AGE = 20 * 3600
+NO_DSR = {"XM", "SG"}                    # BIS publishes no debt service ratio for these: asking only raises a false alarm
+MACRO_VERSION = 4                        # raise when fetch_macro gains a series, to force one full refresh
+ACCUMULATE = {"y10", "cpi_m"}            # monthly series merged with the previous run
 PROD_SRC = "World Bank / ILO · growth in output per worker"
+Y10_LABEL = {
+    "cfets": "China Foreign Exchange Trade System (chinamoney.com.cn) · 10-year government bond yield; history builds up month by month",
+    "tesouro": "Tesouro Nacional · fixed-rate bond nearest 10 years to maturity, monthly average",
+    "mas": "Monetary Authority of Singapore · 10-year SGS benchmark yield",
+    "ecb": "European Central Bank · 10-year yield on AAA-rated euro-area government bonds (daily yield curve, monthly average)",
+    "cbsl": "Central Bank of Sri Lanka · Treasury bond auctions, bonds with 7.5–12.5 years to maturity (dated: updated only when CBSL republishes the table)",
+}
 
 
 def ik(d):
@@ -150,9 +161,23 @@ def fetch_macro():
                 mon["rate"] = monthly(pol)
                 src["rate"] = f"BIS · {c['cb']} policy rate (year end; monthly)"
         if k == "LK":
-            s["rate"] = dict(LK_POLICY)
-            mon["rate"] = {f"{y}-12": v for y, v in LK_POLICY.items()}
-            src["rate"] = "CBSL policy rate, entered by hand from CBSL announcements (verify)"
+            pol, tbill = O.cbsl_rates()
+            if pol:
+                s["rate"] = annual_last(pol)
+                mon["rate"] = monthly(pol)
+                src["rate"] = "Central Bank of Sri Lanka · policy rate (Overnight Policy Rate; corridor midpoint before Nov 2024), monthly table plus the live policy-rates page"
+                if tbill:
+                    mon["tbill"] = monthly(tbill)
+                    src["tbill"] = "Central Bank of Sri Lanka · 12-month Treasury bill yield"
+            ccpi = O.cbsl_inflation()
+            if ccpi:
+                mon["cpi_m"] = ccpi
+                src["cpi_m"] = "Central Bank of Sri Lanka · CCPI inflation, year on year, monthly"
+        if k == "EA":
+            esi = O.eurostat_esi()
+            if esi:
+                mon["cli"] = esi
+                src["cli"] = "European Commission via Eurostat · Economic Sentiment Indicator (100 = long-run average). Stand-in: the OECD publishes no euro-area leading indicator"
         cb = c.get("credit_bis", c["bis"])
         if cb:
             for name, sec in [("credit", "P"), ("hh", "H"), ("corp", "N")]:
@@ -160,7 +185,7 @@ def fetch_macro():
                 if d:
                     s[name] = annual_last(d)
                     src[name] = "BIS · credit to " + {"P": "private non-financial sector", "H": "households", "N": "non-financial companies"}[sec] + " % GDP"
-            d = S.bis("WS_DSR", "1.0", f"Q.{cb}.P", "1999")
+            d = S.bis("WS_DSR", "1.0", f"Q.{cb}.P", "1999") if cb not in NO_DSR else None
             if d:
                 s["dsr"] = annual_mean(d)
                 src["dsr"] = "BIS · private-sector debt service ratio (% of income)"
@@ -173,6 +198,13 @@ def fetch_macro():
                 s["y10"] = annual_mean(d)
                 mon["y10"] = monthly(d)
                 src["y10"] = f"FRED ({c['y10']}) · 10-year government bond yield"
+        fetch = {"cfets": O.china_y10, "tesouro": O.brazil_y10, "mas": O.singapore_y10, "cbsl": O.cbsl_bond10, "ecb": O.ecb_y10}.get(c.get("y10_src"))
+        if fetch:
+            d = fetch()
+            if d:   # a national source, when it answers, replaces the FRED series
+                s["y10"] = annual_mean(d)
+                mon["y10"] = monthly({m: round(statistics.mean(v for p, v in d.items() if p[:7] == m), 3) for m in {p[:7] for p in d}})
+                src["y10"] = Y10_LABEL[c["y10_src"]]
         if c["oecd"] and cli.get(c["oecd"]):
             mon["cli"] = cli[c["oecd"]]
             src["cli"] = "OECD · composite leading indicator (amplitude adjusted, 100 = trend)"
@@ -200,17 +232,22 @@ def merge_macro(new, prev):
         for name, v in (prev.get(part) or {}).items():
             if not new[part].get(name):
                 new[part][name] = v
+            elif part == "monthly" and name in ACCUMULATE:
+                new[part][name] = dict(sorted({**v, **new[part][name]}.items()))  # feeds with little history build up over time
+                if name == "y10":
+                    new["series"]["y10"] = annual_mean(new[part][name])
     return new
 
 
 # ---------------------------------------------------------------- markets
-def equity_stats(q):
+def equity_stats(q, min_year=250):
+    """min_year: trading days needed before a 12-month return is quoted (Colombo trades about 240 days a year)."""
     cl, dates = q["close"], q["dates"]
     p = cl[-1]
     out = {"price": round(p, 2), "date": dates[-1]}
     if len(cl) >= 2:
         out["day_chg"] = round((cl[-1] / cl[-2] - 1) * 100, 2)
-    if len(cl) >= 250:
+    if len(cl) >= min_year:
         out["ret_12m"] = round((p / cl[-252 if len(cl) >= 252 else 0] - 1) * 100, 1)
     if len(cl) >= 200:
         out["above_200d"] = p > sum(cl[-200:]) / 200
@@ -229,14 +266,17 @@ def fetch_markets(prev):
             a = S.cse_aspi()
             old = (prev_eco.get(c["key"], {}).get("now", {}).get("equity") or {})
             hist = dict(zip(old.get("spark", {}).get("dates", []), old.get("spark", {}).get("close", [])))
+            hist.update(O.cse_history() or {})          # about a year of daily closes from the exchange
             if a:
-                d = time.strftime("%Y-%m-%d", time.gmtime(a["time"]))
-                hist[d] = a["price"]
+                hist[time.strftime("%Y-%m-%d", time.gmtime(a["time"]))] = a["price"]
+            if hist and (a or len(hist) > 1):
                 ds = sorted(hist)[-260:]
-                eq[c["key"]] = {"price": a["price"], "date": d, "day_chg": a["change_pct"],
-                                "spark": {"dates": ds, "close": [hist[x] for x in ds]}, "note": "History builds up from daily bot runs"}
+                st = equity_stats({"dates": ds, "close": [hist[x] for x in ds]}, min_year=225)
+                if a:
+                    st["day_chg"] = a["change_pct"]
+                eq[c["key"]] = {**st, "note": "Colombo Stock Exchange"}
             elif old:
-                eq[c["key"]] = old
+                eq[c["key"]] = {**old, "stale": True}
             continue
         q = S.yahoo(c["index"])
         if q:
@@ -293,7 +333,7 @@ def fetch_news(prev):
 def build(prev, full):
     prev_ok = prev and prev.get("schema") == 2
     macro_age = NOW - (prev.get("macro_fetched_ts", 0) if prev_ok else 0)
-    has_new = prev_ok and any("rev" in e.get("series", {}) for e in prev["economies"].values())  # series added in the Nov 2026 rebuild
+    has_new = prev_ok and prev.get("macro_version") == MACRO_VERSION   # a newer bot fetches series the old file lacks
     if full or not prev_ok or not has_new or macro_age > MACRO_MAX_AGE:
         eco_raw, world_raw = fetch_macro()
         for k in eco_raw:
@@ -328,6 +368,11 @@ def build(prev, full):
         s = {n: ik(v) for n, v in raw["series"].items()}
         mon = raw["monthly"]
         notes = []
+        if k == "LK" and "rate" not in mon:   # CBSL never reached: fall back to the hand-entered year-end values
+            s["rate"] = dict(LK_POLICY)
+            mon = {**mon, "rate": {f"{y}-12": v for y, v in LK_POLICY.items()}}
+            raw["sources"]["rate"] = "CBSL policy rate: hand-entered backstop, because the CBSL site could not be read"
+            notes.append("Sri Lanka's policy rate could not be read from the CBSL website, so hand-entered year-end values are shown. Check Data health.")
         rate_m = mon.get("rate") or {}
         latest_rate = rate_m[max(rate_m)] if rate_m else None
         rate_date = max(rate_m) if rate_m else None
@@ -338,8 +383,6 @@ def build(prev, full):
             older = [m for m in ks if m <= target_m]
             if older:
                 rate_chg_12m = round(rate_m[ks[-1]] - rate_m[older[-1]], 2)
-        if k == "LK":
-            notes.append("Sri Lanka's policy rate has no free data feed; it is entered by hand in bot/countries.py (LK_POLICY). Check it against CBSL announcements.")
         if k == "SG":
             notes.append("Singapore has no policy interest rate: MAS manages the exchange rate, so rate-based rules are skipped.")
             notes.append("Singapore's government debt is issued to build reserves and is matched by large assets, so the debt score overstates its risk.")
@@ -350,11 +393,17 @@ def build(prev, full):
         ph_hist = {y: d["phase"] for y, d in ph_det.items()}
         ph_now, inputs = A.phase_now(k, s, c["target"], YEAR, latest_rate)
         cli = A.cli_phase(mon.get("cli"))
+        if cli:
+            cli["label"] = "EC economic sentiment indicator" if k == "EA" else "OECD leading indicator"
+        cpi_m = mon.get("cpi_m") or {}
+        cpi_latest = {"value": cpi_m[max(cpi_m)], "month": max(cpi_m), "prev": cpi_m.get(sorted(cpi_m)[-2]) if len(cpi_m) > 1 else None} if cpi_m else None
         gov, credit = s.get("gov", {}), s.get("credit", {})
         gy = max((y for y in gov if y <= LAST_ACTUAL), default=None)
         cy = max(credit, default=None)
         y10_m = mon.get("y10") or {}
         y10_now = y10_m[max(y10_m)] if y10_m else None
+        if y10_m and (YEAR - int(max(y10_m)[:4])) * 12 + int(time.strftime("%m", time.gmtime(NOW))) - int(max(y10_m)[5:]) > 6:
+            y10_now = None   # more than six months old: kept on the chart, but not used in any live signal
         nominal = (s.get("gdp", {}).get(YEAR, 0) + s.get("cpi", {}).get(YEAR, 0)) if s.get("gdp", {}).get(YEAR) is not None and s.get("cpi", {}).get(YEAR) is not None else None
         min_rate = min((v for y, v in s.get("rate", {}).items() if y >= 2008), default=None)
         backed = bool(c.get("asset_backed"))
@@ -366,7 +415,8 @@ def build(prev, full):
                                    gov.get(gy - 10) if gy else None, credit.get(cy - 10) if cy else None,
                                    min_rate, r_now, nominal, k in EMERGING, crisis, YEAR, r_label)
         cpi_now, cpi_prev = cpi_s.get(YEAR), cpi_s.get(YEAR - 1)
-        real = round(latest_rate - cpi_now, 2) if latest_rate is not None and cpi_now is not None else None
+        cpi_real = cpi_latest["value"] if cpi_latest else cpi_now   # the latest monthly reading, where a national source gives one
+        real = round(latest_rate - cpi_real, 2) if latest_rate is not None and cpi_real is not None else None
         hh_s, dsr_s = s.get("hh", {}), s.get("dsr", {})
         tot = (lambda y: (0 if backed else gov[y]) + credit[y] if y in credit and (backed or y in gov) else None)
         c10 = tot(cy) - tot(cy - 10) if cy and tot(cy) is not None and tot(cy - 10) is not None else None
@@ -405,7 +455,7 @@ def build(prev, full):
         }
         scr = A.screen(metrics)
         now = {"phase": ph_now, "inputs": inputs, "rate": latest_rate, "rate_date": rate_date, "rate_chg_12m": rate_chg_12m,
-               "y10": y10_now, "y10_date": max(y10_m) if y10_m else None, "cli": cli, "lt": ltc, "levers": lev, "rules": rules, "nominal": A.r1(nominal, 2),
+               "y10": y10_now, "y10_date": max(y10_m) if y10_m else None, "cli": cli, "lt": ltc, "levers": lev, "rules": rules, "nominal": A.r1(nominal, 2), "cpi_latest": cpi_latest,
                "equity": e, "fx": fx.get(k), "news_tone": tone, "real_rate": real, "metrics": metrics,
                "share_nominal": round(s["gdp_usd"][YEAR] / world_gdp_usd * 100, 2) if world_gdp_usd and s.get("gdp_usd", {}).get(YEAR) else None,
                "share_ppp": s.get("ppp_share", {}).get(YEAR)}
@@ -447,7 +497,7 @@ def build(prev, full):
 
     data = {
         "schema": 2, "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW)), "generated_ts": int(NOW),
-        "macro_fetched_ts": int(macro_ts), "year": YEAR, "last_actual": LAST_ACTUAL,
+        "macro_fetched_ts": int(macro_ts), "macro_version": MACRO_VERSION, "year": YEAR, "last_actual": LAST_ACTUAL,
         "economies": economies, "world": world, "markets": markets,
         "news": {"by": news}, "health": S.LOG[-60:],
     }

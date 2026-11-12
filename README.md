@@ -6,7 +6,7 @@ Tabs: **World**, **Countries** (short-term cycle wave with replay, long-term deb
 
 Nothing on the page is written by hand. The long-term stage, the levers and the rules of thumb are worked out from the data on every run.
 
-**How it works:** a Python bot (`bot/update.py`) runs on GitHub Actions every hour. It pulls free public data (IMF, World Bank, BIS, OECD, FRED, Yahoo Finance, the Colombo Stock Exchange, ECB FX rates and Google News), applies the rules in `bot/analyze.py`, writes `docs/data/data.json` and republishes the site on GitHub Pages. The page (`docs/`) is plain HTML/JS. It re-checks the data file every 2 minutes and shows a notice when new data lands.
+**How it works:** a Python bot (`bot/update.py`) runs on GitHub Actions every hour. It pulls free public data (IMF, World Bank, BIS, OECD, FRED, Eurostat, the Central Bank of Sri Lanka, the Monetary Authority of Singapore, China's CFETS, Brazil's Tesouro Nacional, Yahoo Finance, the Colombo Stock Exchange, ECB FX rates and Google News), applies the rules in `bot/analyze.py`, writes `docs/data/data.json` and republishes the site on GitHub Pages. The page (`docs/`) is plain HTML/JS. It re-checks the data file every 2 minutes and shows a notice when new data lands.
 
 No server, no database, no API keys, no cost.
 
@@ -41,7 +41,8 @@ Python 3.9+ only, no packages to install. `python3 -m unittest discover -s tests
 | What | Where |
 |---|---|
 | Add or remove a country | `bot/countries.py` → `COUNTRIES` (one line each) |
-| Sri Lanka policy rate (no free feed) | `bot/countries.py` → `LK_POLICY` (add the new year-end value when CBSL moves) |
+| National sources (CBSL, CSE, CFETS, Tesouro, MAS, Eurostat) | `bot/official.py`: one small fetcher per source, each with a tested parser |
+| Sri Lanka policy rate backstop | `bot/countries.py` → `LK_POLICY`. Used only if the CBSL website has never been reached; normally the bot reads the rate from CBSL |
 | Cycle, debt and screen rules | `bot/analyze.py` (tested in `tests/test_rules.py`) |
 | Long-term stage thresholds, lever ratings | `bot/analyze.py` → `lt_cycle`, `levers` |
 | Page sections for Countries, Compare, The Machine | `docs/cycles.js` |
@@ -50,6 +51,7 @@ Python 3.9+ only, no packages to install. `python3 -m unittest discover -s tests
 
 ## If something breaks
 
+- Some national figures are read from web pages and spreadsheets, not data feeds. If a site changes its layout, that fetcher stops, the last good value stays on the page, and a warning appears under Data health. The fix is in the matching parser in `bot/official.py`; `tests/test_official.py` shows the format each one expects.
 - Every source is fetched separately. If one fails, the last good values are kept and a warning appears under **How it works → Data health**.
 - If the whole run fails validation, the data file is not overwritten, so the site keeps showing the last good data. The header dot turns amber ("Delayed") when the data is more than 3 hours old.
 - GitHub pauses scheduled workflows in repos with no commits for 60 days. The bot commits a data snapshot on the 1st of each month to prevent this.

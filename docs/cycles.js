@@ -112,10 +112,11 @@ function signals(k) {
   const est = Y + " est.";
   if (x.gdp != null && x.trend != null) { const g = x.gdp - x.trend; T("Real GDP growth", f(x.gdp), "%", est, `${sgn(g, 1, "")} pt vs ${f(x.trend)}% 10-year trend`, g > 0.5 ? "good" : g < -1 ? "bad" : "warn", g >= 0 ? "▲" : "▼", S.gdp); }
   if (x.cpi != null && x.target != null) { const d = x.cpi - x.target; T("Inflation", f(x.cpi), "%", est, `${sgn(d, 1, "")} pt vs ${f(x.target)}% ${x.kind || "target"}`, Math.abs(d) <= 0.75 ? "good" : Math.abs(d) <= 1.5 ? "warn" : "bad", d > 0 ? "▲" : "▼", S.cpi); }
+  const cl = n.cpi_latest; if (cl) { const d = cl.value - c.target; T("Inflation, latest month", f(cl.value), "%", fmtMonth(cl.month), `Year on year${cl.prev != null ? `, from ${f(cl.prev)}% the month before` : ""}. Target ${f(c.target)}%`, Math.abs(d) <= 0.75 ? "good" : Math.abs(d) <= 1.5 ? "warn" : "bad", cl.prev != null && cl.value < cl.prev ? "▼" : "▲", S.cpi_m); }
   if (n.rate != null) { const ch = n.rate_chg_12m; T("Policy rate", f(n.rate, 2), "%", fmtMonth(n.rate_date), ch == null ? "" : `${sgn(ch, 2, "")} pt vs a year earlier`, ch == null ? "" : ch < -0.1 ? "good" : ch > 0.25 ? "bad" : "warn", ch == null ? "" : ch < 0 ? "▼" : ch > 0 ? "▲" : "■", S.rate); }
   else T("Policy rate", "n/a", "", "", k === "SG" ? "MAS steers the exchange rate instead" : "No free source", "", "", null);
   if (n.y10 != null && n.rate != null) { const cv = (n.y10 - n.rate) * 100; T("10-year yield − policy rate", (cv > 0 ? "+" : "") + Math.round(cv), "bp", fmtMonth(n.y10_date), `10-year yield ${f(n.y10, 2)}%. Below zero (inverted) warns of recession`, cv < 0 ? "bad" : cv < 50 ? "warn" : "good", cv < 0 ? "▼" : "▲", S.y10); }
-  if (n.cli) { const g = n.cli.phase === "expansion" || n.cli.phase === "recovery"; T("Leading indicator", f(n.cli.level, 2), "", fmtMonth(n.cli.month), `${CLI[n.cli.phase]}: ${sgn(n.cli.chg3m, 2, "")} in 3 months. 100 = trend; turns 6–9 months early`, g ? "good" : n.cli.phase === "downturn" ? "warn" : "bad", n.cli.chg3m > 0 ? "▲" : "▼", S.cli); }
+  if (n.cli) { const g = n.cli.phase === "expansion" || n.cli.phase === "recovery"; T(k === "EA" ? "Economic sentiment" : "Leading indicator", f(n.cli.level, 2), "", fmtMonth(n.cli.month), `${CLI[n.cli.phase]}: ${sgn(n.cli.chg3m, 2, "")} in 3 months. ${k === "EA" ? "100 = long-run average" : "100 = trend; turns 6–9 months early"}`, g ? "good" : n.cli.phase === "downturn" ? "warn" : "bad", n.cli.chg3m > 0 ? "▲" : "▼", S.cli); }
   const u = latestOf(s.unemp, Y); if (u) { const ch = u.v - (s.unemp[u.y - 1] ?? u.v); T("Unemployment", f(u.v), "%", u.y === Y ? est : u.y, `${sgn(ch, 1, "")} pt on the year`, ch > 0.5 ? "bad" : ch > 0.15 ? "warn" : "good", ch > 0 ? "▲" : "▼", S.unemp); }
   const r1 = n.rules && n.rules[0], c1 = r1 && r1.bars[0] && r1.bars[0][1], cr = latestOf(s.credit);
   if (c1 != null && r1.st !== "na") T("Private credit vs income", sgn(c1, 1, ""), "pt of GDP", cr.y, c1 > 0 ? "Debt grew faster than income" : "Debt grew slower than income", c1 <= 0 ? "good" : c1 < 3 ? "warn" : "bad", c1 > 0 ? "▲" : "▼", S.credit);
@@ -125,7 +126,7 @@ function signals(k) {
   const ds = latestOf(s.dsr); if (ds) T("Private debt service ratio", f(ds.v), "% of income", ds.y, "Share of income spent on interest and repayments", ds.v < 15 ? "good" : ds.v < 18 ? "warn" : "bad", "■", S.dsr);
   if (n.nominal != null && n.y10 != null) { const d = n.nominal - n.y10; T("Nominal growth − 10y yield", sgn(d, 1, ""), "pt", est, `Nominal growth ${f(n.nominal)}%. Above zero, debts shrink relative to income`, d > 0.5 ? "good" : d > -0.5 ? "warn" : "bad", d > 0 ? "▲" : "▼", "Derived: real growth plus inflation, minus the 10-year yield"); }
   else if (n.nominal != null) T("Nominal growth", f(n.nominal), "%", est, "Real growth plus inflation: what debts are paid from", "", "", "Derived from IMF growth and inflation");
-  if (n.real_rate != null) T("Real policy rate", sgn(n.real_rate, 1, ""), "%", est, n.real_rate < 0 ? "Below inflation: eases debt, hurts savers" : "Policy rate minus inflation", n.real_rate < 0 ? "warn" : n.real_rate > 3 ? "warn" : "good", n.real_rate >= 0 ? "▲" : "▼", "Derived");
+  if (n.real_rate != null) T("Real policy rate", sgn(n.real_rate, 1, ""), "%", n.cpi_latest ? fmtMonth(n.cpi_latest.month) : est, n.real_rate < 0 ? "Below inflation: eases debt, hurts savers" : n.cpi_latest ? "Policy rate minus the latest monthly inflation" : "Policy rate minus inflation", n.real_rate < 0 ? "warn" : n.real_rate > 3 ? "warn" : "good", n.real_rate >= 0 ? "▲" : "▼", "Derived");
   const ca = n.metrics.ca; if (ca != null) T("Current account", sgn(ca, 1, ""), "% GDP", est, ca < 0 ? "Borrowing from abroad" : "Lending to the world", ca > -2 ? "good" : ca > -4 ? "warn" : "bad", ca >= 0 ? "▲" : "▼", S.ca);
   const rs = latestOf(s.res); if (rs && k !== "US" && k !== "EA") T("FX reserves", f(rs.v), "months of imports", rs.y, "Cover for imports if foreign money stops", rs.v >= 6 ? "good" : rs.v >= 3 ? "warn" : "bad", "■", S.res);
   const fx = n.fx; if (fx && fx.chg_12m != null && k !== "US") T(`${c.ccy} vs US dollar`, sgn(fx.chg_12m, 1, ""), "%", "12 months", `${big(fx.per_usd)} per US$. Plus means stronger`, Math.abs(fx.chg_12m) < 5 ? "good" : fx.chg_12m < -10 ? "bad" : "warn", fx.chg_12m >= 0 ? "▲" : "▼", "ECB reference rates / open.er-api.com");
@@ -209,9 +210,9 @@ function renderCountry(v) {
     <div class="grid g2">
       <div class="panel"><div class="panel-head"><div><h3>Real GDP growth, %</h3><p>Dashed line is the 10-year trend; the last point is an IMF projection.</p></div></div><div class="chart" id="c-gdp"></div><p class="cap">${esc(c.sources.gdp || "")}</p></div>
       <div class="panel"><div class="panel-head"><div><h3>Inflation, %</h3><p>CPI, annual average, against the central bank's target.</p></div></div><div class="chart" id="c-cpi"></div><p class="cap">${esc(c.sources.cpi || "")}</p></div>
-      <div class="panel"><div class="panel-head"><div><h3>Interest rates, %</h3><p>Monthly. A falling policy rate means easing.</p></div></div><div class="chart" id="c-rate"></div><p class="cap">${esc([c.sources.rate, c.sources.y10].filter(Boolean).join(" · "))}</p></div>
+      <div class="panel"><div class="panel-head"><div><h3>Interest rates, %</h3><p>Monthly. A falling policy rate means easing.</p></div></div><div class="chart" id="c-rate"></div><p class="cap">${esc([c.sources.rate, c.sources.y10, c.sources.tbill].filter(Boolean).join(" · "))}</p></div>
       <div class="panel"><div class="panel-head"><div><h3>Debt, % of GDP</h3><p>Government, households and firms.</p></div></div><div class="chart" id="c-debt"></div><p class="cap">${esc([c.sources.gov, c.sources.credit].filter(Boolean).join(" · "))}</p></div>
-      <div class="panel"><div class="panel-head"><div><h3>OECD leading indicator</h3><p>Turns 6–9 months before the economy. 100 = trend.</p></div></div><div class="chart" id="c-cli"></div></div>
+      <div class="panel"><div class="panel-head"><div><h3>${esc(n.cli && n.cli.label ? n.cli.label[0].toUpperCase() + n.cli.label.slice(1) : "Leading indicator")}</h3><p>${k === "EA" ? "Business and consumer confidence across the euro area. 100 = long-run average." : "Turns 6–9 months before the economy. 100 = trend."}</p></div></div><div class="chart" id="c-cli"></div>${c.sources.cli ? `<p class="cap">${esc(c.sources.cli)}</p>` : ""}</div>
       <div class="panel"><div class="panel-head"><div><h3>${esc(c.index_name)}</h3><p>Daily closes, last 12 months${eq.note ? " · " + esc(eq.note) : ""}.</p></div></div><div class="chart" id="c-eq"></div></div>
     </div></section>
 
@@ -259,6 +260,7 @@ function renderCountry(v) {
   const rs = [];
   if (c.monthly.rate) rs.push({name: "Policy rate", c: "--s1", pts: stepify(mon(c.monthly.rate, "2005-01"))});
   if (c.monthly.y10) rs.push({name: "10-year yield", c: "--s2", pts: mon(c.monthly.y10, "2005-01")});
+  if (c.monthly.tbill) rs.push({name: "12-month Treasury bill", c: "--s3", pts: mon(c.monthly.tbill, "2005-01")});
   if (rs.length) lineChart($("#c-rate"), {series: rs, unit: "%", zero: true, xfmt: "month", bands, label: "Rates"}); else $("#c-rate").innerHTML = `<p class="muted small">${esc(c.notes[0] || "No free source for rates.")}</p>`;
   const ds = [{name: "Government", c: "--s1", pts: ann(c.series.gov, 2000).filter(p => p[0] <= LA)}];
   if (c.series.hh) ds.push({name: "Households", c: "--s2", pts: ann(c.series.hh, 2000)});
@@ -278,6 +280,10 @@ function dataNotes(k) {
   if (cr && cr.y < LA - 2) out.push(`Private credit data stops in ${cr.y}, so debt totals and the first rule of thumb use old figures.`);
   if (!s.hh && !s.corp) out.push("No split of private debt into households and firms is published for this economy.");
   if (!c.monthly.y10) out.push("No free source for the 10-year bond yield; the policy rate is used in its place for interest-versus-growth checks.");
+  else { const ms = Object.keys(c.monthly.y10).sort(), lastM = ms[ms.length - 1], age = (new Date().getFullYear() - +lastM.slice(0, 4)) * 12 + new Date().getMonth() + 1 - +lastM.slice(5);
+    if (age > 3) out.push(`The 10-year bond yield is dated: the latest figure is for ${fmtMonth(lastM)}.`);
+    if (ms.length < 12) out.push(`The 10-year bond yield has only ${ms.length} month${ms.length === 1 ? "" : "s"} of history so far; the source publishes the latest month only, so the chart fills in over time.`); }
+  if (k === "EA") out.push("The euro area has no OECD leading indicator, so the European Commission's Economic Sentiment Indicator stands in for it. It measures confidence, with 100 as its long-run average.");
   if (!c.monthly.cli) out.push("The OECD does not publish a leading indicator for this economy.");
   if (!s.dsr) out.push("No BIS debt service ratio for this economy.");
   if (!s.prod) out.push("No productivity series, so the third rule of thumb cannot be checked.");
@@ -293,7 +299,7 @@ const METRICS = {
   unemp: {t: "Unemployment rate", get: k => ann(E(k).series.unemp, 2000).filter(p => p[0] <= D.year), unit: "%", proj: true},
   rate: {t: "Policy rate (monthly)", get: k => stepify(mon(E(k).monthly.rate, "2005-01")), unit: "%", m: true},
   y10: {t: "10-year bond yield (monthly)", get: k => mon(E(k).monthly.y10, "2005-01"), unit: "%", m: true},
-  cli: {t: "OECD leading indicator", get: k => mon(E(k).monthly.cli, "2015-01"), m: true},
+  cli: {t: "Leading indicator (OECD; EC sentiment for the euro area)", get: k => mon(E(k).monthly.cli, "2015-01"), m: true},
   gov: {t: "Government debt, % of GDP", get: k => ann(E(k).series.gov, 2000).filter(p => p[0] <= D.year), unit: "%", proj: true},
   credit: {t: "Private credit, % of GDP", get: k => ann(E(k).series.credit, 2000), unit: "%"},
   hh: {t: "Household debt, % of GDP", get: k => ann(E(k).series.hh, 2000), unit: "%"},

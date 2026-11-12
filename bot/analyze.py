@@ -444,10 +444,13 @@ def summary(c, now, year):
         parts.append("Singapore steers its exchange rate instead of an interest rate, so rate rules are skipped.")
     cli = now.get("cli")
     if cli:
-        parts.append(f"The OECD leading indicator is {cli['level']:.2f} ({CLI_PHASES[cli['phase']].lower()}, {cli['chg3m']:+.2f} over 3 months to {cli['month']}).")
+        parts.append(f"The {cli.get('label', 'OECD leading indicator')} is {cli['level']:.2f} ({CLI_PHASES[cli['phase']].lower()}, {cli['chg3m']:+.2f} over 3 months to {cli['month']}).")
     lt = now.get("lt")
     if lt:
         parts.append(f"Long-term debt cycle: **{LT_STAGES[lt['stage']].lower()}**. {lt['rule']}.")
+    cl = now.get("cpi_latest")
+    if cl:
+        parts.append(f"Latest monthly inflation is {cl['value']:.1f}% ({cl['month']}).")
     eq = now.get("equity")
     if eq and eq.get("ret_12m") is not None:
         parts.append(f"The {c['index_name']} is {eq['ret_12m']:+.1f}% over 12 months.")
@@ -475,7 +478,7 @@ def diff(prev, new, ts):
             out.append({"ts": ts, "key": k, "kind": "cycle", "text": f"{name}: cycle phase moved from {PHASES.get(pn.get('phase'), 'n/a')} to {PHASES[nn['phase']]}"})
         pc, nc = (pn.get("cli") or {}), (nn.get("cli") or {})
         if nc and pc.get("month") != nc.get("month"):
-            out.append({"ts": ts, "key": k, "kind": "cli", "text": f"{name}: OECD leading indicator for {nc['month']} published at {nc['level']:.2f} ({CLI_PHASES[nc['phase']]})"})
+            out.append({"ts": ts, "key": k, "kind": "cli", "text": f"{name}: {nc.get('label', 'OECD leading indicator')} for {nc['month']} published at {nc['level']:.2f} ({CLI_PHASES[nc['phase']]})"})
         elif nc and pc.get("phase") and pc.get("phase") != nc.get("phase"):
             out.append({"ts": ts, "key": k, "kind": "cli", "text": f"{name}: leading indicator turned from {CLI_PHASES[pc['phase']]} to {CLI_PHASES[nc['phase']]}"})
         if pn.get("rate") is not None and nn.get("rate") is not None and abs(pn["rate"] - nn["rate"]) >= 0.05:

@@ -6,6 +6,7 @@
 The zip holds everything needed to run it on another computer: start files, the bot, the page,
 the latest data, the tests and the guides. Git history and caches are left out.
 """
+import stat
 import sys
 import time
 import zipfile
@@ -28,7 +29,8 @@ def main():
             info = zipfile.ZipInfo(f"{TOP}/{p.relative_to(ROOT).as_posix()}", time.localtime(p.stat().st_mtime)[:6])
             info.compress_type = zipfile.ZIP_DEFLATED
             run = p.suffix in EXECUTABLE or p.parent.name == "MacOS"                  # start file and the app's launcher
-            info.external_attr = (0o755 if run else 0o644) << 16                        # keep them double-clickable
+            # mark it as a regular file too: some unzip tools (ditto) ignore the permissions otherwise
+            info.external_attr = (stat.S_IFREG | (0o755 if run else 0o644)) << 16       # keep them double-clickable
             z.writestr(info, p.read_bytes())
     print(f"{out}  ·  {len(files)} files  ·  {out.stat().st_size / 1024:.0f} KB")
 

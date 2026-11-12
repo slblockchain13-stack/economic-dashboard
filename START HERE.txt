@@ -15,8 +15,12 @@ What you need
 How to start it
   Mac:      double-click  "Economic Dashboard"  (the app with the wave icon, in
             this folder). Drag it to the Dock to keep it handy, but leave the
-            app itself in this folder. The first time, macOS may refuse to
-            open it. If so, right-click it, choose Open, then Open again.
+            app itself in this folder.
+            First time only, if this copy came from the internet (Google
+            Drive, email, AirDrop): macOS says it cannot check the app. Click
+            Done, open System Settings > Privacy & Security, scroll down, click
+            "Open Anyway" next to Economic Dashboard and confirm. A copy from
+            a USB stick opens straight away.
   Windows:  double-click  "Start Dashboard (Windows).bat"  once. It puts an
             "Economic Dashboard" icon on your desktop; from then on use that.
             If Windows shows a blue warning, click "More info", then "Run anyway".

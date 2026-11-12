@@ -189,6 +189,27 @@ class AppMode(unittest.TestCase):
         self.assertIn("<string>launch</string>", (app / "Info.plist").read_text())
         self.assertTrue((ROOT / "icons" / "dashboard.ico").read_bytes().startswith(b"\0\0\1\0"))
 
+    def test_zip_keeps_the_mac_launchers_runnable(self):
+        import stat as st
+        import zipfile
+        sys.path.insert(0, str(ROOT / "tools"))
+        import make_pack
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "pack.zip"
+            saved = sys.argv
+            sys.argv = ["make_pack", str(out)]
+            try:
+                make_pack.main()
+            finally:
+                sys.argv = saved
+            with zipfile.ZipFile(out) as z:
+                modes = {i.filename.split("/", 1)[1]: i.external_attr >> 16 for i in z.infolist()}
+        for name in ("Economic Dashboard.app/Contents/MacOS/launch", "Start Dashboard (Mac).command"):
+            self.assertTrue(st.S_ISREG(modes[name]), name)              # without this, ditto drops the permissions
+            self.assertEqual(modes[name] & 0o777, 0o755, name)
+        self.assertEqual(modes["START HERE.txt"] & 0o777, 0o644)
+        self.assertNotIn("local.log", modes)
+
 
 if __name__ == "__main__":
     unittest.main()

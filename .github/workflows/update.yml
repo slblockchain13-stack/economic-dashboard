@@ -2,7 +2,9 @@ name: Update dashboard
 
 on:
   schedule:
-    - cron: "7 * * * *"        # every hour at :07 (UTC)
+    # GitHub runs schedules "best effort" and drops many of them (on 2026-11-12 only 2 of ~12 hourly runs
+    # started). So it tries four times an hour; a try is skipped when the site is under 50 minutes old.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       full:
@@ -31,17 +33,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Skip if the site is already fresh
+        # Scheduled tries only. The page's own data says when it was made; under 50 minutes old means an
+        # earlier try this hour got through, so this one does nothing (and costs about 10 seconds).
+        id: fresh
+        if: github.event_name == 'schedule'
+        run: |
+          URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/data.json"
+          TS=$(curl -fsS --max-time 20 "$URL" | python3 -c "import sys,json; print(json.load(sys.stdin)['generated_ts'])" || echo 0)
+          AGE=$(( $(date +%s) - TS ))
+          echo "Site data is $(( AGE / 60 )) minutes old."
+          if [ "$AGE" -lt 3000 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Fresh enough, skipping this try."; fi
+
       - uses: actions/setup-python@v5
+        if: steps.fresh.outputs.skip != 'true'
         with:
           python-version: "3.12"
 
       - name: Rule tests
+        if: steps.fresh.outputs.skip != 'true'
         run: python -m unittest discover -s tests -v
 
       - id: pages
+        if: steps.fresh.outputs.skip != 'true'
         uses: actions/configure-pages@v5
 
       - name: Run the update bot
+        if: steps.fresh.outputs.skip != 'true'
         # If the bot fails, the step is allowed to fail and the last good data is deployed again.
         continue-on-error: true
         run: |
@@ -50,23 +68,28 @@ jobs:
           python bot/update.py --prev "${{ steps.pages.outputs.base_url }}/data/data.json" $FULL
 
       - name: Check the data file the site will read
+        if: steps.fresh.outputs.skip != 'true'
         run: python -m unittest tests.test_rules.PublishedFile -v
 
       - name: Monthly snapshot (keeps the schedule alive and backs up the data)
         # GitHub pauses scheduled workflows in repos with no commits for 60 days.
-        if: github.event_name == 'schedule'
+        # On the 1st of the month, by the first try that gets through (a single hour was too easy to miss).
+        if: github.event_name == 'schedule' && steps.fresh.outputs.skip != 'true'
         run: |
-          if [ "$(date -u +%d%H)" = "0100" ]; then
+          MONTH="Monthly data snapshot $(date -u +%Y-%m)"
+          if [ "$(date -u +%d)" = "01" ] && [ "$(git log -1 --format=%s)" != "$MONTH" ]; then
             git config user.name "dashboard-bot"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add docs/data/data.json
-            git commit -m "Monthly data snapshot $(date -u +%Y-%m)" || true
+            git commit -m "$MONTH" || true
             git push || true
           fi
 
       - uses: actions/upload-pages-artifact@v3
+        if: steps.fresh.outputs.skip != 'true'
         with:
           path: docs
 
       - id: deploy
+        if: steps.fresh.outputs.skip != 'true'
         uses: actions/deploy-pages@v4

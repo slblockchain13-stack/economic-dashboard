@@ -28,7 +28,10 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-if curl -s -m 2 "$URL/api/status" | grep -q '"local"'; then
+# Quick check: already running on the usual port? (Only our own status reply carries this name, so
+# another project on the port does not count.) Anything else, including a dashboard that had to move
+# to another port, is sorted out by run_local.py, which picks a free port or reopens the running one.
+if curl -s -m 2 "$URL/api/status" | grep -q '"app": "economic-machine-monitor"'; then
   open "$URL"
   exit 0
 fi

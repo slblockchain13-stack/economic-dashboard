@@ -2,6 +2,8 @@
 Run: python3 -m unittest discover -s tests"""
 import json
 import os
+import random
+import socket
 import stat
 import sys
 import tempfile
@@ -10,7 +12,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +58,9 @@ class LocalServer(unittest.TestCase):
         R.claude_path = lambda: self.fake
 
     H = {"Content-Type": "application/json", "X-Dashboard": "local"}
+
+    def test_status_names_the_app(self):
+        self.assertEqual(json.loads(call(self.port, "/api/status")[1])["app"], R.APP_ID)
 
     def test_serves_the_page_and_status(self):
         code, body = call(self.port, "/index.html")
@@ -209,6 +214,79 @@ class AppMode(unittest.TestCase):
             self.assertEqual(modes[name] & 0o777, 0o755, name)
         self.assertEqual(modes["START HERE.txt"] & 0o777, 0o644)
         self.assertNotIn("local.log", modes)
+
+
+class PortChoice(unittest.TestCase):
+    """Another project's dev server on the dashboard's port must not be mistaken for the dashboard."""
+
+    def setUp(self):
+        self.socks, self.servers = [], []
+        while True:                                  # find a run of free ports to play with
+            self.base = random.randint(40000, 60000)
+            if not any(R.port_answers(p) for p in range(self.base, self.base + 4)):
+                break
+
+    def tearDown(self):
+        for s in self.socks:
+            s.close()
+        for srv in self.servers:
+            srv.shutdown()
+            srv.server_close()
+
+    def other_program(self, port, host="127.0.0.1"):
+        """Another project's dev server. On 127.0.0.1 it answers web requests, even /api/status with a
+        reply like the dashboard's own minus its name; on ::1 it just listens."""
+        if ":" in host:
+            s = socket.socket(socket.AF_INET6)
+            s.bind((host, port))
+            s.listen()
+            self.socks.append(s)
+            return
+
+        class Other(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b'{"local": true}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+        srv = ThreadingHTTPServer((host, port), Other)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.servers.append(srv)
+
+    def dashboard(self, port):
+        srv = ThreadingHTTPServer(("127.0.0.1", port), R.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.servers.append(srv)
+
+    def test_free_port_is_used(self):
+        self.assertEqual(R.choose_port(self.base, 3), ("free", self.base))
+
+    def test_moves_past_another_program(self):
+        self.other_program(self.base)
+        self.assertEqual(R.choose_port(self.base, 3), ("free", self.base + 1))
+
+    def test_another_program_on_ipv6_localhost_counts_as_busy(self):
+        if not socket.has_ipv6:
+            self.skipTest("no IPv6 on this machine")
+        try:
+            self.other_program(self.base, "::1")
+        except OSError:
+            self.skipTest("cannot listen on ::1 here")
+        self.assertEqual(R.choose_port(self.base, 3), ("free", self.base + 1))
+
+    def test_reopens_a_dashboard_already_running_on_a_later_port(self):
+        self.other_program(self.base)
+        self.dashboard(self.base + 1)
+        self.assertEqual(R.choose_port(self.base, 3), ("running", self.base + 1))
+
+    def test_every_port_taken(self):
+        self.other_program(self.base)
+        self.other_program(self.base + 1)
+        self.assertEqual(R.choose_port(self.base, 2), (None, None))
 
 
 if __name__ == "__main__":

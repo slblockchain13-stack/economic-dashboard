@@ -19,7 +19,7 @@ A self-updating dashboard of business cycles for 13 economies plus the world, re
 | `bot/update.py` | Orchestrator. Writes `docs/data/data.json`. |
 | `docs/app.js` | Page shell, charts, World / Opportunities / News / How it works tabs. |
 | `docs/cycles.js` | Countries, Compare and The Machine tabs, cycle charts, Ask AI panel. |
-| `run_local.py` | Local server: static files, `/api/status`, `/api/ask`, `/api/refresh`. `--app` (used by the icons) logs to `local.log` and stops 30 min after the last tab closes. Finds Claude Code on PATH, in the usual install folders, or inside the Claude desktop app (`claude_candidates`); always asks with `--model opus`. |
+| `run_local.py` | Local server: static files, `/api/status`, `/api/ask`, `/api/refresh`. Starts on 8765, or the next free port up to 8774 if another program has it (checks 127.0.0.1 and ::1); if the dashboard is already running on one of them (`/api/status` carries `app: economic-machine-monitor`) it just reopens that. `--app` (used by the icons) logs to `local.log` and stops 30 min after the last tab closes. Finds Claude Code on PATH, in the usual install folders, or inside the Claude desktop app (`claude_candidates`); always asks with `--model opus`. |
 | `Economic Dashboard.app` | Mac app icon. `Contents/MacOS/launch` finds Python, opens the page if already running, else starts `run_local.py --app`. Must stay in this folder. |
 | `icons/`, `tools/make_icons.py` | The app icon, drawn by script; rerun it to change the icon (writes the `.icns` into the app and the Windows `.ico`). Windows desktop shortcut: `run_local.py --make-shortcut`, run by the Windows start file. |
 | `.github/workflows/update.yml` | Hourly run and deploy for the public GitHub Pages copy (not included in the local zip). |

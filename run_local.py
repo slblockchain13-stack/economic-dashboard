@@ -20,11 +20,13 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.request
 import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -50,6 +52,8 @@ SYSTEM_PROMPT = (
     "'## ' headings, '- ' bullets and **bold** only. Keep it under 350 words unless asked for more."
 )
 
+APP_ID = "economic-machine-monitor"   # in /api/status, so a copy that is already running can be told apart
+PORT_TRIES = 10               # if 8765 is taken by another program, try 8766 ... 8774
 IDLE_STOP_MIN = 30            # --app: stop this many minutes after the page last checked in
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # Windows: no console flashing up for child processes
 
@@ -183,7 +187,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.split("?")[0] == "/api/status":
             if not self.local_request():
                 return self.send_json({"error": "forbidden"}, 403)
-            return self.send_json({"local": True, "claude": bool(claude_path()), "refreshing": state["refreshing"],
+            return self.send_json({"local": True, "app": APP_ID, "claude": bool(claude_path()), "refreshing": state["refreshing"],
                                    "last_refresh": state["last_refresh"], "last_error": state["last_error"]})
         if self.path.startswith("/api/"):
             return self.send_json({"error": "not found"}, 404)
@@ -211,6 +215,40 @@ class Handler(SimpleHTTPRequestHandler):
             threading.Thread(target=refresh, kwargs={"full": bool(body.get("full"))}, daemon=True).start()
             return self.send_json({"ok": True, "text": "Refresh started. The page updates by itself when it finishes."})
         return self.send_json({"error": "not found"}, 404)
+
+
+def port_answers(port):
+    """Is anything listening on this port, on either localhost address? Browsers may send 'localhost' to
+    the IPv6 address (::1), where another project's dev server can sit unseen by a bind to 127.0.0.1."""
+    for host in ("127.0.0.1", "::1"):
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def is_dashboard(port):
+    """Is the program on this port a copy of this dashboard (and not some other project)?"""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/status", headers={"Host": "localhost"})
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return json.loads(r.read(4096)).get("app") == APP_ID
+    except Exception:  # noqa: BLE001 - anything else on the port is simply "not us"
+        return False
+
+
+def choose_port(start, tries=PORT_TRIES):
+    """Returns ("running", port) if the dashboard already runs on one of the ports, ("free", port) for the
+    first port nothing is using, or (None, None) when every port is taken."""
+    ports = range(start, start + tries)
+    busy = [p for p in ports if port_answers(p)]
+    for p in busy:
+        if is_dashboard(p):
+            return "running", p
+    free = next((p for p in ports if p not in busy), None)
+    return ("free", free) if free else (None, None)
 
 
 def idle_watch(srv, minutes, check_every=30):
@@ -265,14 +303,24 @@ def main():
         a.idle_stop = IDLE_STOP_MIN
     if sys.version_info < (3, 9):
         sys.exit("Python 3.9 or newer is needed. Get it from https://www.python.org/downloads/")
-    try:
-        srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
-    except OSError:
-        url = f"http://localhost:{a.port}"
-        print(f"Port {a.port} is already in use. If the dashboard is already running, open {url}\n"
-              f"Otherwise start it on another port:  python3 run_local.py --port {a.port + 1}")
+    found, port = choose_port(a.port)
+    if found == "running":
+        url = f"http://localhost:{port}"
+        print(f"The dashboard is already running at {url}, opening it.")
         if not a.no_open:
             webbrowser.open(url)
+        return
+    if found is None:
+        print(f"Ports {a.port} to {a.port + PORT_TRIES - 1} are all in use by other programs. "
+              f"Start it on another one:  python3 run_local.py --port {a.port + PORT_TRIES}")
+        return
+    if port != a.port:
+        print(f"Port {a.port} is used by another program, so the dashboard uses port {port}.")
+    a.port = port
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+    except OSError as e:
+        print(f"Could not start on port {a.port} ({e}). Try:  python3 run_local.py --port {a.port + 1}")
         return
     url = f"http://localhost:{a.port}"
     print(f"Economic Machine Monitor is running at {url}")

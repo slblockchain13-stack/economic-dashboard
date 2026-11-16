@@ -26,7 +26,8 @@ How to start it
             If Windows shows a blue warning, click "More info", then "Run anyway".
   Linux, or from a terminal anywhere:   python3 run_local.py
 
-  Your browser opens the dashboard at http://localhost:8765 . No window stays
+  Your browser opens the dashboard at http://localhost:8765 (or 8766, 8767 ...
+  if another program on this computer is already using 8765). No window stays
   open when you start it from the icon. Double-clicking the icon again while it
   is running just opens the page again. The numbers shown at first are the
   ones saved last time; a refresh starts straight away and the page updates by

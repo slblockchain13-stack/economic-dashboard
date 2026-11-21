@@ -59,8 +59,9 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Run the update bot
+        id: bot
         if: steps.fresh.outputs.skip != 'true'
-        # If the bot fails, the step is allowed to fail and the last good data is deployed again.
+        # If the bot fails, the last good data is still deployed, then the last step marks the run as failed.
         continue-on-error: true
         run: |
           FULL=""
@@ -93,3 +94,10 @@ jobs:
       - id: deploy
         if: steps.fresh.outputs.skip != 'true'
         uses: actions/deploy-pages@v4
+
+      - name: Fail the run if the update bot failed
+        # The site keeps the last good data, but the run turns red (and GitHub emails you) so a dead source is noticed.
+        if: steps.bot.outcome == 'failure'
+        run: |
+          echo "::error::The update bot failed, so the site is still showing older data. Open the 'Run the update bot' step above for the reason."
+          exit 1

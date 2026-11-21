@@ -391,7 +391,7 @@ function renderMethod(v) {
     <div class="panel"><h3>OECD business-cycle clock</h3><p class="small" style="margin-top:6px">The composite leading indicator tracks orders, confidence, spreads and share prices, and turns 6–9 months before GDP. Above 100 and rising is <b>expansion</b>, above 100 and falling is <b>downturn</b>, below 100 and falling is <b>slowdown</b>, below 100 and rising is <b>recovery</b>. Recovery is historically the best entry point for stocks. Uses the 3-month change.</p></div>
     <div class="panel"><h3>Long-term debt cycle</h3><p class="small" style="margin-top:6px">After Ray Dalio's framework. A 0–1 <b>debt-pressure score</b> comes from government debt against an advanced- or emerging-economy yardstick, total non-financial debt, its 10-year change, whether rates have needed the zero bound since 2008, and whether interest rates sit above nominal growth. The score, plus the signs of a debt crisis and its repair, place each economy on five stages: early, bubble building, top, deleveraging, normalisation. The four deleveraging levers and the three rules of thumb are read from budget, revenue, credit and productivity data. <a href="#machine">The Machine</a> tab lists every rule.</p></div>
     <div class="panel"><h3>Investment screen</h3><p class="small" style="margin-top:6px"><b>Stocks</b>: cycle phase, leading indicator, 12-month rate direction, momentum (above the 200-day average), a dip from the 1-year high while the cycle turns up, and news tone. <b>Bonds</b>: real policy rate, the inflation trend, slowing growth, the yield above inflation, and the debt load. <b>Currency</b>: current account, reserves, real rate and 12-month trend. Over +1.25 is Favourable, under −0.75 is Cautious. Score out of 100 = 50% stocks, 25% bonds, 25% currency.</p></div>
-    <div class="panel"><h3>Sources</h3><ul class="why small"><li>IMF World Economic Outlook (DataMapper API): growth, inflation, unemployment, debt, current account, GDP, projections</li><li>World Bank: reserves, fallbacks</li><li>BIS: policy rates, private credit, debt-service ratios</li><li>OECD: composite leading indicators</li><li>FRED (St. Louis Fed): 10-year bond yields</li><li>Yahoo Finance: stock indices, commodities, VIX</li><li>Colombo Stock Exchange: ASPI</li><li>ECB (Frankfurter) and open.er-api: exchange rates</li><li>Google News / Bing News RSS: headlines</li><li>Central Bank of Sri Lanka: policy rate, Treasury bill and bond yields, monthly CCPI inflation</li><li>Colombo Stock Exchange: All Share index and its history</li><li>China Foreign Exchange Trade System, Tesouro Nacional (Brazil), Monetary Authority of Singapore: 10-year government bond yields</li><li>European Commission via Eurostat: euro-area economic sentiment</li></ul></div>
+    <div class="panel"><h3>Sources</h3><ul class="why small"><li>IMF World Economic Outlook (SDMX API): growth, inflation, unemployment, debt, current account, GDP, projections</li><li>World Bank: reserves, fallbacks</li><li>BIS: policy rates, private credit, debt-service ratios</li><li>OECD: composite leading indicators</li><li>FRED (St. Louis Fed): 10-year bond yields</li><li>Yahoo Finance: stock indices, commodities, VIX</li><li>Colombo Stock Exchange: ASPI</li><li>ECB (Frankfurter) and open.er-api: exchange rates</li><li>Google News / Bing News RSS: headlines</li><li>Central Bank of Sri Lanka: policy rate, Treasury bill and bond yields, monthly CCPI inflation</li><li>Colombo Stock Exchange: All Share index and its history</li><li>China Foreign Exchange Trade System, Tesouro Nacional (Brazil), Monetary Authority of Singapore: 10-year government bond yields</li><li>European Commission via Eurostat: euro-area economic sentiment</li></ul></div>
   </section>
   <section class="disclaimer">Built for education and research. Every label comes from published rules over public data; nothing is hand-picked. Signals are not investment advice.</section>`;
   const rb = $("#refresh-now");
@@ -399,6 +399,40 @@ function renderMethod(v) {
     try { const r = await fetch("api/refresh", {method: "POST", headers: {"Content-Type": "application/json", "X-Dashboard": "local"}, body: "{}"}); $("#refresh-status").textContent = (await r.json()).text; }
     catch (e) { $("#refresh-status").textContent = "Could not reach the local dashboard server."; }
     setTimeout(() => { rb.disabled = false; }, 60000); };
+}
+
+/* ---------- refresh button (next to the status) ----------
+   Local copy: runs the update bot now and waits for it. Public site: there is no server to run it,
+   so it fetches the newest published file and says when the next hourly update is due. */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function refreshNow() {
+  const b = $("#refresh"); if (b.disabled) return;
+  b.disabled = true; b.classList.add("spin");
+  try {
+    if (state.local) {
+      $("#status-text").textContent = "Updating… (about a minute)";
+      const r = await fetch("api/refresh", {method: "POST", headers: {"Content-Type": "application/json", "X-Dashboard": "local"}, body: "{}"});
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      let s = null;
+      for (let i = 0; i < 120; i++) {           // up to 6 minutes
+        await sleep(3000);
+        s = await (await fetch("api/status", {cache: "no-store"})).json();
+        if (!s.refreshing) break;
+      }
+      state.local = s;
+      const before = lastGenerated; await load(false);
+      if (s && s.last_error) toast("The update did not finish, so the older data is still shown: " + s.last_error.trim().split("\n").pop().slice(0, 160));
+      else if (lastGenerated === before) toast("Update finished, no new data yet.");
+    } else {
+      const before = lastGenerated; await load(false);
+      if (lastGenerated === before) {
+        const old = Date.now() / 1000 - D.generated_ts > 3 * 3600;
+        toast(old ? "No newer data has been published yet. The site updates itself every hour; if this stays delayed, the update job needs a look."
+                  : "You have the latest data. The site updates itself every hour.");
+      }
+    }
+  } catch (e) { toast("Could not check for new data (" + e.message + ")."); setStatus(); }
+  finally { b.disabled = false; b.classList.remove("spin"); }
 }
 
 /* ---------- boot ---------- */
@@ -411,6 +445,7 @@ function renderMethod(v) {
     try { localStorage.setItem("emm-theme", nx); } catch (e) {}
   };
 })();
+$("#refresh").onclick = refreshNow;
 window.addEventListener("hashchange", route);
 let rz, lastW = innerWidth; window.addEventListener("resize", () => { if (innerWidth === lastW) return; lastW = innerWidth; clearTimeout(rz); rz = setTimeout(() => { const y = scrollY; render(); scrollTo(0, y); }, 200); });
 /* served by run_local.py? then the Ask AI button and "Refresh now" are available */

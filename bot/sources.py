@@ -57,16 +57,43 @@ def world_bank(indicator, iso3s, start=1990):
     return out
 
 
-def imf(indicator, codes):
-    """IMF DataMapper (WEO incl. projections). {code: {year: value}}"""
-    txt = get(f"https://www.imf.org/external/datamapper/api/v1/{indicator}/" + "/".join(codes))
+# The IMF retired the DataMapper API (www.imf.org/external/datamapper/api/v1) in November 2026.
+# The same World Economic Outlook figures, projections included, come from its SDMX 3.0 service.
+IMF_SDMX = "https://api.imf.org/external/sdmx/3.0/data/dataflow/IMF.RES/WEO/+/"
+IMF_AREA = {"EURO": "G163", "WEOWORLD": "G001"}           # DataMapper code -> SDMX code
+IMF_IND = {"GGXONLB_G01_GDP_PT": "GGXONLB_NGDP", "GGR_G01_GDP_PT": "GGR_NGDP", "G_X_G01_GDP_PT": "GGX_NGDP"}
+
+
+def parse_imf_sdmx(txt):
+    """SDMX-JSON from the IMF WEO dataflow -> {sdmx_country: {year: value}} for the one indicator asked for."""
     out = defaultdict(dict)
+    d = json.loads(txt)["data"]
+    st = d["structures"][0]
+    dims = st["dimensions"]["series"]
+    ci = next(i for i, x in enumerate(dims) if x["id"] == "COUNTRY")
+    years = [v.get("value", v.get("id")) for v in st["dimensions"]["observation"][0]["values"]]
+    for key, ser in (d["dataSets"][0].get("series") or {}).items():
+        area = dims[ci]["values"][int(key.split(":")[ci])]["id"]
+        for j, obs in (ser.get("observations") or {}).items():
+            x = obs[0] if obs else None
+            if x not in (None, "", "NaN"):
+                out[area][int(years[int(j)])] = round(float(x), 3)
+    return out
+
+
+def imf(indicator, codes):
+    """IMF World Economic Outlook (incl. projections). Takes and returns DataMapper codes. {code: {year: value}}"""
+    sd = {c: IMF_AREA.get(c, c) for c in codes}
+    url = IMF_SDMX + "+".join(sd.values()) + "." + IMF_IND.get(indicator, indicator) + ".A"
+    txt = get(url, accept="application/json")
+    out = defaultdict(dict)
+    if not txt:
+        return out
     try:
-        vals = json.loads(txt).get("values", {}).get(indicator, {}) if txt else {}
-        for code in codes:
-            for y, x in (vals.get(code) or {}).items():
-                if x is not None:
-                    out[code][int(y)] = round(float(x), 3)
+        got = parse_imf_sdmx(txt)
+        for c, s in sd.items():
+            if got.get(s):
+                out[c] = got[s]
     except Exception as e:  # noqa: BLE001
         _log("IMF", False, f"{indicator}: {e}")
     return out

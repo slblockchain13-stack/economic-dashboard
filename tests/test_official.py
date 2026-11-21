@@ -149,5 +149,38 @@ class Merging(unittest.TestCase):
         self.assertAlmostEqual(U.equity_stats(q, min_year=225)["ret_12m"], 23.9, places=1)
 
 
+class IMFSdmx(unittest.TestCase):
+    # trimmed from api.imf.org/external/sdmx/3.0/data/dataflow/IMF.RES/WEO/+/G163+USA.NGDP_RPCH.A (Nov 2026)
+    SAMPLE = json.dumps({"meta": {}, "data": {
+        "dataSets": [{"structure": 0, "series": {
+            "0:0:0": {"observations": {"0": ["1.236817"], "1": ["1.119116"]}},
+            "1:0:0": {"observations": {"0": ["2.344098"], "1": ["2.327686"], "2": [None]}}}}],
+        "structures": [{"dimensions": {
+            "series": [{"id": "COUNTRY", "values": [{"id": "G163"}, {"id": "USA"}]},
+                       {"id": "INDICATOR", "values": [{"id": "NGDP_RPCH"}]},
+                       {"id": "FREQUENCY", "values": [{"id": "A"}]}],
+            "observation": [{"id": "TIME_PERIOD", "values": [{"value": "2025"}, {"value": "2026"}, {"value": "2027"}]}]}}]}})
+
+    def test_parse(self):
+        got = S.parse_imf_sdmx(self.SAMPLE)
+        self.assertEqual(got["USA"], {2025: 2.344, 2026: 2.328})        # empty 2027 dropped
+        self.assertEqual(got["G163"][2026], 1.119)
+
+    def test_codes_mapped_back(self):
+        seen = {}
+        real_get = S.get
+        S.get = lambda url, **k: seen.setdefault("url", url) and self.SAMPLE
+        try:
+            out = S.imf("NGDP_RPCH", ["USA", "EURO"])
+        finally:
+            S.get = real_get
+        self.assertIn("/USA+G163.NGDP_RPCH.A", seen["url"])
+        self.assertEqual(set(out), {"USA", "EURO"})                    # callers keep DataMapper codes
+        self.assertEqual(out["EURO"][2025], 1.237)
+
+    def test_fiscal_names(self):
+        self.assertEqual(S.IMF_IND["GGR_G01_GDP_PT"], "GGR_NGDP")
+
+
 if __name__ == "__main__":
     unittest.main()

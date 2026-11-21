@@ -41,7 +41,9 @@ p{margin:0}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 var(--good);animation:pulse 2.4s infinite}
 .dot.stale{background:var(--warn);animation:none}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
-@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+#refresh.spin{animation:spin 1s linear infinite;cursor:progress}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.dot,#refresh.spin{animation:none}}
 nav.tabs{display:flex;gap:2px;margin-left:auto;overflow-x:auto;scrollbar-width:none;max-width:100%}
 nav.tabs::-webkit-scrollbar{display:none}
 nav.tabs a{font:600 13px var(--body);color:var(--ink-2);text-decoration:none;border:1px solid transparent;border-radius:6px;padding:7px 11px;white-space:nowrap}
